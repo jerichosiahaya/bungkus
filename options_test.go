@@ -95,7 +95,8 @@ func TestOptionsUsageFinish(t *testing.T) {
 }
 
 func TestToolChoiceMapping(t *testing.T) {
-	cc := (&client{}).chatCompletionsBody
+	cc := func(r *ChatRequest) map[string]any { b, _ := (&client{}).chatCompletionsBody(r); return b }
+	messagesBody := func(r *ChatRequest) map[string]any { b, _ := messagesBody(r); return b }
 	for choice, want := range map[string]any{"auto": "auto", "none": "none", "required": "required"} {
 		if got := cc(&ChatRequest{ToolChoice: choice})["tool_choice"]; got != want {
 			t.Errorf("chat completions %q: got %v", choice, got)

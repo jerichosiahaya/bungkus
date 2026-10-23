@@ -89,6 +89,9 @@ func TestBadResponses(t *testing.T) {
 	if _, err := NewOpenAI("k", WithBaseURL(serve(t, 200, `{"choices":[]}`))).Chat(context.Background(), &ChatRequest{}); err == nil || !strings.Contains(err.Error(), "no choices") {
 		t.Errorf("no choices: got %v", err)
 	}
+	if _, err := NewAnthropic("k", WithBaseURL(serve(t, 200, `{"content":["not a block"]}`))).Chat(context.Background(), &ChatRequest{}); err == nil {
+		t.Error("anthropic: want error for a non-object content block")
+	}
 	for name, body := range map[string]string{
 		"openai bad json":     "data: {oops\n\n",
 		"openai error event":  `data: {"error":{"message":"rate limited"}}` + "\n\n",

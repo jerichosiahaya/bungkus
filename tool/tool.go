@@ -124,6 +124,13 @@ func (n *Node) Run(ctx context.Context, msg bungkus.Message) ([]bungkus.Message,
 }
 
 func (n *Node) invoke(ctx context.Context, call bungkus.ToolCall) (string, error) {
+	ctx, end := bungkus.StartRun(ctx, bungkus.RunInfo{Component: bungkus.ComponentTool, Name: call.Name}, call)
+	content, err := n.invokeTool(ctx, call)
+	end(content, err)
+	return content, err
+}
+
+func (n *Node) invokeTool(ctx context.Context, call bungkus.ToolCall) (string, error) {
 	t, ok := n.tools[call.Name]
 	if !ok {
 		return fmt.Sprintf("error: unknown tool %q", call.Name), nil

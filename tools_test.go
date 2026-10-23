@@ -121,7 +121,7 @@ func TestToolCalling(t *testing.T) {
 }
 
 func TestMessagesBodyGroupsToolResults(t *testing.T) {
-	body := messagesBody(&ChatRequest{Messages: []Message{
+	body, _ := messagesBody(&ChatRequest{Messages: []Message{
 		{Role: "user", Content: "hi"},
 		{Role: "assistant", ToolCalls: []ToolCall{{ID: "a", Name: "x"}, {ID: "b", Name: "y"}}},
 		{Role: "tool", ToolCallID: "a", Content: "1"},
@@ -129,10 +129,10 @@ func TestMessagesBodyGroupsToolResults(t *testing.T) {
 		{Role: "user", Content: "thanks"},
 	}})
 	msgs := body["messages"].([]anthMessage)
-	if len(msgs) != 4 || len(msgs[2].Content) != 2 || msgs[3].Content[0].Text != "thanks" {
+	if len(msgs) != 4 || len(msgs[2].Content) != 2 || msgs[3].Content[0].(anthBlock).Text != "thanks" {
 		t.Errorf("tool results not grouped: %+v", msgs)
 	}
-	if string(msgs[1].Content[0].Input) != "{}" {
-		t.Errorf("empty arguments should become {}: %s", msgs[1].Content[0].Input)
+	if in := msgs[1].Content[0].(anthBlock).Input; string(in) != "{}" {
+		t.Errorf("empty arguments should become {}: %s", in)
 	}
 }

@@ -6,19 +6,59 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"iter"
+	"math/rand/v2"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type Message struct {
 	Role       string     `json:"role"` // "system", "user", "assistant", "tool"
 	Content    string     `json:"content"`
+	Parts      []Part     `json:"parts,omitempty"`        // images and files sent with Content
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // assistant: the tools the model wants called
 	ToolCallID string     `json:"tool_call_id,omitempty"` // tool: the ToolCall.ID this result answers
+
+	// Reasoning is the model's readable thinking, when the provider returns it
+	// (DeepSeek and BytePlus reasoning_content, Claude thinking summaries).
+	Reasoning string `json:"reasoning,omitempty"`
+	// ReasoningData is provider state that must be sent back unchanged with the
+	// message, such as Claude's signed thinking blocks. Keep it in your history.
+	ReasoningData json.RawMessage `json:"reasoning_data,omitempty"`
+}
+
+// Part types.
+const (
+	PartImage = "image"
+	PartFile  = "file" // e.g. a PDF
+)
+
+// Part is an image or file attached to a message.
+type Part struct {
+	Type string `json:"type"`           // PartImage or PartFile
+	URL  string `json:"url"`            // https URL or data URL (see DataURL); chat-completions providers need data URLs for files
+	Name string `json:"name,omitempty"` // file name
+}
+
+// DataURL encodes data as a data URL for Part.URL.
+func DataURL(mimeType string, data []byte) string {
+	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data)
+}
+
+func parseDataURL(u string) (mimeType, data string, ok bool) {
+	rest, ok := strings.CutPrefix(u, "data:")
+	if !ok {
+		return "", "", false
+	}
+	meta, data, ok := strings.Cut(rest, ",")
+	mimeType, isBase64 := strings.CutSuffix(meta, ";base64")
+	return mimeType, data, ok && isBase64
 }
 
 // Tool describes a function the model may call.
@@ -41,6 +81,15 @@ type ToolCall struct {
 	Arguments string `json:"arguments"` // JSON object matching the tool's Parameters
 }
 
+// ResponseFormat asks for a JSON reply.
+type ResponseFormat struct {
+	Name string // schema name, required by OpenAI; "" means "response"
+	// Schema is the JSON Schema the reply must match. OpenAI and Anthropic
+	// require "additionalProperties": false on every object. nil asks for any
+	// JSON object, which Anthropic does not support and DeepSeek requires.
+	Schema json.RawMessage
+}
+
 type ChatRequest struct {
 	Model     string // for azure the deployment name, for byteplus the model or endpoint ID
 	Messages  []Message
@@ -56,6 +105,13 @@ type ChatRequest struct {
 	// ToolChoice is "" (provider default), "auto", "none", "required"
 	// (must call some tool), or a tool name to force that tool.
 	ToolChoice string
+
+	// ReasoningEffort is passed through as reasoning_effort (OpenAI, Azure,
+	// DeepSeek, BytePlus) or output_config.effort (Anthropic). Valid values
+	// depend on the model, e.g. "low", "medium", "high", "max".
+	ReasoningEffort string
+
+	ResponseFormat *ResponseFormat // nil means plain text
 }
 
 // Finish reasons, normalized across providers.
@@ -89,13 +145,53 @@ type ChatResponse struct {
 
 type Provider interface {
 	Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error)
-	// ChatStream yields text deltas as they arrive. The last chunk has no text;
-	// it carries the complete ToolCalls, FinishReason and Usage. Stop ranging to cancel.
+	// ChatStream yields Content and Reasoning deltas as they arrive. The last
+	// chunk carries the complete ToolCalls, ReasoningData, FinishReason and
+	// Usage. Collect joins the chunks into one response. Stop ranging to cancel.
 	ChatStream(ctx context.Context, req *ChatRequest) iter.Seq2[*ChatResponse, error]
 }
 
+// Collect reads a stream to the end and joins its chunks into one response.
+// On error it returns what arrived so far along with the error.
+func Collect(stream iter.Seq2[*ChatResponse, error]) (*ChatResponse, error) {
+	var c collector
+	for chunk, err := range stream {
+		if err != nil {
+			return c.result(), err
+		}
+		c.add(chunk)
+	}
+	return c.result(), nil
+}
+
+type collector struct {
+	resp               ChatResponse
+	content, reasoning strings.Builder
+}
+
+func (c *collector) add(chunk *ChatResponse) {
+	c.content.WriteString(chunk.Content)
+	c.reasoning.WriteString(chunk.Reasoning)
+	c.resp.ToolCalls = append(c.resp.ToolCalls, chunk.ToolCalls...)
+	if chunk.ReasoningData != nil {
+		c.resp.ReasoningData = chunk.ReasoningData
+	}
+	if chunk.FinishReason != "" {
+		c.resp.FinishReason = chunk.FinishReason
+	}
+	if chunk.Usage != (Usage{}) {
+		c.resp.Usage = chunk.Usage
+	}
+}
+
+func (c *collector) result() *ChatResponse {
+	r := c.resp
+	r.Role, r.Content, r.Reasoning = "assistant", c.content.String(), c.reasoning.String()
+	return &r
+}
+
 // APIError is returned when a provider responds with a non-2xx status.
-// Use errors.As to inspect StatusCode, e.g. to retry on 429.
+// Use errors.As to inspect StatusCode.
 type APIError struct {
 	Provider   string
 	StatusCode int
@@ -116,6 +212,13 @@ func WithBaseURL(url string) Option {
 // WithHTTPClient sets the HTTP client, e.g. for timeouts or proxies.
 func WithHTTPClient(hc *http.Client) Option {
 	return func(c *client) { c.hc = hc }
+}
+
+// WithRetries sets how many times a request is retried after a 408, 429 or
+// 5xx response or a network error. The default is 2; 0 disables retries.
+// Waits follow the Retry-After header when present, else exponential backoff.
+func WithRetries(n int) Option {
+	return func(c *client) { c.retries = n }
 }
 
 // New returns a provider by name: openai, anthropic, azure, byteplus, deepseek.
@@ -147,20 +250,50 @@ type client struct {
 	headers        map[string]string // auth headers
 	maxTokensField string            // chat completions only: "max_tokens" or "max_completion_tokens"
 	hc             *http.Client
+	retries        int
 }
 
 func newClient(name, baseURL string, headers map[string]string, opts []Option) client {
-	c := client{name: name, baseURL: baseURL, headers: headers, maxTokensField: "max_tokens", hc: http.DefaultClient}
+	c := client{name: name, baseURL: baseURL, headers: headers, maxTokensField: "max_tokens", hc: http.DefaultClient, retries: 2}
 	for _, o := range opts {
 		o(&c)
 	}
 	return c
 }
 
+// chat wraps a provider's Chat with callbacks.
+func (c *client) chat(ctx context.Context, req *ChatRequest, call func(context.Context) (*ChatResponse, error)) (*ChatResponse, error) {
+	ctx, end := StartRun(ctx, RunInfo{Component: ComponentModel, Name: c.name}, req)
+	resp, err := call(ctx)
+	end(resp, err)
+	return resp, err
+}
+
+// chatStream wraps a provider's ChatStream with callbacks, which see the
+// collected response when the stream ends or the caller stops early.
+func (c *client) chatStream(ctx context.Context, req *ChatRequest, stream func(context.Context) iter.Seq2[*ChatResponse, error]) iter.Seq2[*ChatResponse, error] {
+	return func(yield func(*ChatResponse, error) bool) {
+		ctx, end := StartRun(ctx, RunInfo{Component: ComponentModel, Name: c.name}, req)
+		var col collector
+		for chunk, err := range stream(ctx) {
+			if err != nil {
+				end(nil, err)
+				yield(nil, err)
+				return
+			}
+			col.add(chunk)
+			if !yield(chunk, nil) {
+				break
+			}
+		}
+		end(col.result(), nil)
+	}
+}
+
 // stream reads a server-sent events response. parse handles each data payload:
-// it returns any text delta to yield now, and records tool calls, finish reason
-// and usage on final, which is yielded as the last chunk.
-func (c *client) stream(ctx context.Context, path string, body any, parse func(data []byte, final *ChatResponse) (string, error)) iter.Seq2[*ChatResponse, error] {
+// it returns any Content or Reasoning delta to yield now, and records tool
+// calls, reasoning data, finish reason and usage on final, the last chunk.
+func (c *client) stream(ctx context.Context, path string, body any, parse func(data []byte, final *ChatResponse) (Message, error)) iter.Seq2[*ChatResponse, error] {
 	return func(yield func(*ChatResponse, error) bool) {
 		resp, err := c.do(ctx, path, body)
 		if err != nil {
@@ -180,13 +313,16 @@ func (c *client) stream(ctx context.Context, path string, body any, parse func(d
 			if string(data) == "[DONE]" {
 				break
 			}
-			text, err := parse(data, final)
+			delta, err := parse(data, final)
 			if err != nil {
 				yield(nil, err)
 				return
 			}
-			if text != "" && !yield(&ChatResponse{Message: Message{Role: "assistant", Content: text}}, nil) {
-				return
+			if delta.Content != "" || delta.Reasoning != "" {
+				delta.Role = "assistant"
+				if !yield(&ChatResponse{Message: delta}, nil) {
+					return
+				}
 			}
 		}
 		if err := sc.Err(); err != nil {
@@ -206,7 +342,8 @@ func (c *client) post(ctx context.Context, path string, body, out any) error {
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
-// do sends a JSON POST and returns the response, or an *APIError on a non-2xx status.
+// do sends a JSON POST, retrying transient failures, and returns the response
+// or an *APIError on a non-2xx status.
 func (c *client) do(ctx context.Context, path string, body any) (*http.Response, error) {
 	if c.baseURL == "" {
 		return nil, fmt.Errorf("bungkus: %s has no base URL", c.name)
@@ -215,22 +352,67 @@ func (c *client) do(ctx context.Context, path string, body any) (*http.Response,
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(b))
-	if err != nil {
-		return nil, err
+	for attempt := 0; ; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(b))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		for k, v := range c.headers {
+			req.Header.Set(k, v)
+		}
+		resp, err := c.hc.Do(req)
+		var wait time.Duration
+		switch {
+		case err != nil:
+			if ctx.Err() != nil || attempt >= c.retries {
+				return nil, err
+			}
+		case resp.StatusCode < 300:
+			return resp, nil
+		case retryable(resp.StatusCode) && attempt < c.retries:
+			wait = retryAfter(resp.Header)
+			resp.Body.Close()
+		default:
+			defer resp.Body.Close()
+			raw, _ := io.ReadAll(resp.Body)
+			return nil, &APIError{Provider: c.name, StatusCode: resp.StatusCode, Body: string(raw)}
+		}
+		if wait == 0 {
+			wait = backoff(attempt)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(wait):
+		}
 	}
-	req.Header.Set("Content-Type", "application/json")
-	for k, v := range c.headers {
-		req.Header.Set(k, v)
+}
+
+func retryable(status int) bool {
+	return status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= 500
+}
+
+// retryAfter reads OpenAI's retry-after-ms or the standard Retry-After header.
+func retryAfter(h http.Header) time.Duration {
+	if ms, err := strconv.Atoi(h.Get("retry-after-ms")); err == nil {
+		return time.Duration(ms) * time.Millisecond
 	}
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		return nil, err
+	v := h.Get("Retry-After")
+	if s, err := strconv.Atoi(v); err == nil {
+		return time.Duration(s) * time.Second
 	}
-	if resp.StatusCode >= 300 {
-		defer resp.Body.Close()
-		raw, _ := io.ReadAll(resp.Body)
-		return nil, &APIError{Provider: c.name, StatusCode: resp.StatusCode, Body: string(raw)}
+	if t, err := http.ParseTime(v); err == nil {
+		return time.Until(t)
 	}
-	return resp, nil
+	return 0
+}
+
+// backoff is a variable so tests can skip waiting.
+var backoff = defaultBackoff
+
+// defaultBackoff is 0.5s, 1s, 2s, ... capped at 8s, with ±25% jitter.
+func defaultBackoff(attempt int) time.Duration {
+	d := min(500*time.Millisecond<<attempt, 8*time.Second)
+	return d*3/4 + rand.N(d/2)
 }
