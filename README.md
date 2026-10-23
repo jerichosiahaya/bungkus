@@ -6,15 +6,17 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 *Bungkus* is Indonesian for "wrap". A small Go client that wraps the chat APIs of
-five LLM providers behind one interface. Standard library only, no dependencies.
+five LLM providers behind one interface, with tools, agents, prompt templates and
+observability on top. The core package uses only the standard library; only the
+optional `tracing` package depends on OpenTelemetry.
 
 | Provider | Constructor | Notes |
 |---|---|---|
 | OpenAI | `NewOpenAI(key)` | |
-| Anthropic | `NewAnthropic(key)` | System messages go to the `system` field; `MaxTokens` defaults to 4096 |
+| Anthropic | `NewAnthropic(key)` | System messages go to the `system` field; `MaxTokens` defaults to 4096; thinking blocks are kept and sent back during tool use |
 | Azure OpenAI | `NewAzure(endpoint, key)` | v1 API, endpoint like `https://<resource>.openai.azure.com/openai/v1`; `Model` is the deployment name |
 | BytePlus ModelArk | `NewBytePlus(key)` | `Model` is the model ID or endpoint ID |
-| DeepSeek | `NewDeepSeek(key)` | |
+| DeepSeek | `NewDeepSeek(key)` | `reasoning_content` is sent back, which DeepSeek requires once tools are used |
 
 ## Install
 
@@ -54,8 +56,44 @@ req := &bungkus.ChatRequest{
 	TopP:        new(0.9),
 	Stop:        []string{"\n\n"},
 	ToolChoice:  "required", // "auto", "none", "required", or a tool name
+	ReasoningEffort: "high", // reasoning_effort, or output_config.effort for Anthropic; values depend on the model
 }
 ```
+
+### Reasoning
+
+Models that think return it in `resp.Reasoning` (DeepSeek and BytePlus
+`reasoning_content`, Claude thinking summaries). Claude's signed thinking blocks
+are kept in `resp.ReasoningData`. Keep the whole `resp.Message` in your history:
+DeepSeek rejects tool-use follow-ups without the reasoning, and Claude needs its
+thinking blocks back unchanged.
+
+### Images and files
+
+```go
+img, _ := os.ReadFile("receipt.png")
+msg := bungkus.Message{Role: "user", Content: "What is the total?", Parts: []bungkus.Part{
+	{Type: bungkus.PartImage, URL: bungkus.DataURL("image/png", img)},
+	{Type: bungkus.PartFile, URL: bungkus.DataURL("application/pdf", pdf), Name: "invoice.pdf"},
+}}
+```
+
+Images can also be `https://` URLs. Chat-completions providers (OpenAI, Azure,
+BytePlus) take files only as data URLs. DeepSeek accepts text only.
+
+### JSON output
+
+```go
+req.ResponseFormat = &bungkus.ResponseFormat{
+	Name:   "invoice",
+	Schema: json.RawMessage(`{"type":"object","properties":{"total":{"type":"number"}},"required":["total"],"additionalProperties":false}`),
+}
+resp, _ := p.Chat(ctx, req) // resp.Content is JSON matching the schema
+```
+
+OpenAI and Anthropic need `"additionalProperties": false` on every object. A
+`ResponseFormat` without a `Schema` asks for any JSON object: DeepSeek supports
+only that, and Anthropic does not support it.
 
 ### Streaming
 
@@ -68,8 +106,9 @@ for chunk, err := range p.ChatStream(ctx, req) {
 }
 ```
 
-Breaking out of the loop closes the connection. The last chunk has no text; it
-carries `FinishReason`, `Usage` and any complete `ToolCalls`.
+Chunks carry `Content` and `Reasoning` deltas; the last one carries the complete
+`ToolCalls`, `ReasoningData`, `FinishReason` and `Usage`. `bungkus.Collect(stream)`
+joins them into one response. Breaking out of the loop closes the connection.
 
 ### Tools from Go functions
 
@@ -118,6 +157,39 @@ history = append(history, res.Messages...) // tool calls, tool results and the a
 When a tool gets bad arguments or the model names an unknown tool, the error goes
 back to the model so it can retry. An error your tool function returns stops the run.
 
+`a.Stream` runs the same loop but yields events as they happen:
+
+```go
+for ev, err := range a.Stream(ctx, history) {
+	switch {
+	case err != nil:
+		log.Fatal(err)
+	case ev.Text != "":
+		fmt.Print(ev.Text) // the model writing
+	case ev.Message != nil && ev.Message.Role == "tool":
+		fmt.Println("\n[tool]", ev.Message.Content)
+	case ev.Result != nil:
+		history = append(history, ev.Result.Messages...) // always the last event
+	}
+}
+```
+
+### Prompt templates
+
+```go
+import "github.com/jerichosiahaya/bungkus/prompt"
+
+var tmpl = prompt.Must(prompt.New(
+	bungkus.Message{Role: "system", Content: "You are a {{.role}}. Answer in {{.lang}}."},
+	prompt.Placeholder("history"),
+	bungkus.Message{Role: "user", Content: "{{.question}}"},
+))
+
+msgs, err := tmpl.Format(map[string]any{"role": "travel guide", "lang": "Indonesian", "question": q, "history": history})
+```
+
+Contents are `text/template`s; a variable the template uses but `Format` is not given is an error.
+
 ### Tool calling by hand
 
 Without the `tool` and `agent` packages, set `Tools` and run the loop yourself:
@@ -148,11 +220,6 @@ for {
 The same `Message` history works for every provider: for Anthropic, bungkus converts
 tool calls to `tool_use` blocks and groups consecutive tool results into one user turn.
 
-### Structured output
-
-Force a tool and read its arguments: `ToolChoice: "extract_invoice"` makes every
-provider return JSON matching that tool's schema in `resp.ToolCalls[0].Arguments`.
-
 ### Choosing a provider from config
 
 ```go
@@ -167,19 +234,48 @@ Azure needs `bungkus.WithBaseURL(endpoint)` here.
 bungkus.NewDeepSeek(key,
 	bungkus.WithBaseURL("https://my-proxy.example.com/v1"),
 	bungkus.WithHTTPClient(&http.Client{Timeout: 60 * time.Second}),
+	bungkus.WithRetries(3), // default 2; 0 turns retries off
 )
 ```
 
+Requests are retried on 408, 429, 5xx and network errors, waiting as the
+`Retry-After` header says or with exponential backoff (0.5s, 1s, 2s, ... up to 8s).
+
 ### Errors
 
-Non-2xx responses return `*bungkus.APIError`:
+Non-2xx responses, after retries, return `*bungkus.APIError`:
 
 ```go
 var apiErr *bungkus.APIError
-if errors.As(err, &apiErr) && apiErr.StatusCode == 429 {
-	// back off and retry
+if errors.As(err, &apiErr) && apiErr.StatusCode == 401 {
+	// bad API key
 }
 ```
+
+## Observability
+
+Handlers on the context see every model call, tool call and agent run, with
+nested runs linked to their parent:
+
+```go
+import (
+	"github.com/jerichosiahaya/bungkus/logging"
+	"github.com/jerichosiahaya/bungkus/tracing"
+)
+
+ctx = bungkus.WithHandlers(ctx,
+	logging.New(slog.Default()), // duration, model, finish reason, tokens
+	tracing.New(nil),            // OpenTelemetry spans with GenAI attributes; nil uses the global TracerProvider
+)
+res, err := a.Run(ctx, history) // invoke_agent → chat / execute_tool spans
+```
+
+`tracing.New(nil, tracing.WithContent())` also records prompts, replies and tool
+arguments. To send traces to Langfuse, point an OTLP HTTP exporter at
+`https://cloud.langfuse.com/api/public/otel` with the header
+`Authorization: Basic base64(pk-lf-...:sk-lf-...)`; the model spans appear as generations.
+
+Write your own by implementing `bungkus.Handler` (`OnStart`, `OnEnd`, `OnError`).
 
 ## Using it behind your own port
 
@@ -198,7 +294,8 @@ var llm LLM = bungkus.NewOpenAI(key)
 
 ## Not yet supported
 
-Images and files, reasoning/thinking output, provider-native JSON mode, agent streaming.
+Embeddings and retrieval, graph orchestration, multi-agent, Claude's `budget_tokens`
+thinking (deprecated; use `ReasoningEffort`).
 
 ## Development
 
