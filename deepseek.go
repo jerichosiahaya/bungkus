@@ -1,6 +1,9 @@
 package bungkus
 
-import "context"
+import (
+	"context"
+	"iter"
+)
 
 var _ Provider = (*DeepSeek)(nil)
 
@@ -13,4 +16,8 @@ func NewDeepSeek(apiKey string, opts ...Option) *DeepSeek {
 
 func (p *DeepSeek) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
 	return p.chatCompletions(ctx, req)
+}
+
+func (p *DeepSeek) ChatStream(ctx context.Context, req *ChatRequest) iter.Seq2[*ChatResponse, error] {
+	return p.chatCompletionsStream(ctx, req)
 }

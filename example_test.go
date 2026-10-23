@@ -20,3 +20,18 @@ func Example() {
 	}
 	fmt.Println(resp.Content)
 }
+
+func ExampleAnthropic_ChatStream() {
+	p := bungkus.NewAnthropic(os.Getenv("ANTHROPIC_API_KEY"))
+	req := &bungkus.ChatRequest{
+		Model:    "claude-sonnet-5-5",
+		Messages: []bungkus.Message{{Role: "user", Content: "halo"}},
+	}
+	for chunk, err := range p.ChatStream(context.Background(), req) {
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		fmt.Print(chunk.Content)
+	}
+}

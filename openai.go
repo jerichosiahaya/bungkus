@@ -1,6 +1,9 @@
 package bungkus
 
-import "context"
+import (
+	"context"
+	"iter"
+)
 
 var _ Provider = (*OpenAI)(nil)
 
@@ -15,4 +18,8 @@ func NewOpenAI(apiKey string, opts ...Option) *OpenAI {
 
 func (p *OpenAI) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
 	return p.chatCompletions(ctx, req)
+}
+
+func (p *OpenAI) ChatStream(ctx context.Context, req *ChatRequest) iter.Seq2[*ChatResponse, error] {
+	return p.chatCompletionsStream(ctx, req)
 }

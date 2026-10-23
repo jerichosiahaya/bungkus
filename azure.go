@@ -1,6 +1,9 @@
 package bungkus
 
-import "context"
+import (
+	"context"
+	"iter"
+)
 
 var _ Provider = (*Azure)(nil)
 
@@ -17,4 +20,8 @@ func NewAzure(endpoint, apiKey string, opts ...Option) *Azure {
 
 func (p *Azure) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
 	return p.chatCompletions(ctx, req)
+}
+
+func (p *Azure) ChatStream(ctx context.Context, req *ChatRequest) iter.Seq2[*ChatResponse, error] {
+	return p.chatCompletionsStream(ctx, req)
 }

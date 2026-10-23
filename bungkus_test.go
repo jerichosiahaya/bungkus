@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -58,5 +59,53 @@ func TestChat(t *testing.T) {
 	}
 	if _, err := New("nope", "k"); err == nil {
 		t.Error("unknown provider should fail")
+	}
+}
+
+func TestChatStream(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		if body["stream"] != true {
+			t.Errorf("stream not requested: %v", body)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		switch r.URL.Path {
+		case "/messages":
+			w.Write([]byte("event: message_start\ndata: {\"type\":\"message_start\"}\n\n" +
+				"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"ha\"}}\n\n" +
+				"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"lo\"}}\n\n" +
+				"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))
+		case "/chat/completions":
+			w.Write([]byte("data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{\"content\":\"ha\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n\n" +
+				"data: [DONE]\n\n"))
+		case "/fail/messages":
+			w.Write([]byte("event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n"))
+		}
+	}))
+	defer srv.Close()
+
+	req := &ChatRequest{Model: "m", Messages: []Message{{"user", "hello"}}}
+	for _, name := range []string{"openai", "anthropic", "azure", "byteplus", "deepseek"} {
+		p, _ := New(name, "k", WithBaseURL(srv.URL))
+		var got string
+		for chunk, err := range p.ChatStream(context.Background(), req) {
+			if err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+			got += chunk.Content
+		}
+		if got != "halo" {
+			t.Errorf("%s: got %q", name, got)
+		}
+	}
+
+	var err error
+	for _, err = range NewAnthropic("k", WithBaseURL(srv.URL+"/fail")).ChatStream(context.Background(), req) {
+	}
+	if err == nil || !strings.Contains(err.Error(), "Overloaded") {
+		t.Errorf("want stream error, got %v", err)
 	}
 }
