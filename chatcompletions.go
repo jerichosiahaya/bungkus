@@ -50,6 +50,15 @@ func (c *client) chatCompletionsBody(req *ChatRequest) map[string]any {
 	if req.MaxTokens > 0 {
 		body[c.maxTokensField] = req.MaxTokens
 	}
+	if req.Temperature != nil {
+		body["temperature"] = *req.Temperature
+	}
+	if req.TopP != nil {
+		body["top_p"] = *req.TopP
+	}
+	if len(req.Stop) > 0 {
+		body["stop"] = req.Stop
+	}
 	if len(req.Tools) > 0 {
 		tools := make([]map[string]any, len(req.Tools))
 		for i, t := range req.Tools {
@@ -59,6 +68,13 @@ func (c *client) chatCompletionsBody(req *ChatRequest) map[string]any {
 		}
 		body["tools"] = tools
 	}
+	switch req.ToolChoice {
+	case "":
+	case "auto", "none", "required":
+		body["tool_choice"] = req.ToolChoice
+	default:
+		body["tool_choice"] = map[string]any{"type": "function", "function": map[string]any{"name": req.ToolChoice}}
+	}
 	return body
 }
 
@@ -66,8 +82,10 @@ func (c *client) chatCompletionsBody(req *ChatRequest) map[string]any {
 func (c *client) chatCompletions(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
 	var out struct {
 		Choices []struct {
-			Message ccReply `json:"message"`
+			Message      ccReply `json:"message"`
+			FinishReason string  `json:"finish_reason"`
 		} `json:"choices"`
+		Usage Usage `json:"usage"`
 	}
 	if err := c.post(ctx, "/chat/completions", c.chatCompletionsBody(req), &out); err != nil {
 		return nil, err
@@ -75,9 +93,9 @@ func (c *client) chatCompletions(ctx context.Context, req *ChatRequest) (*ChatRe
 	if len(out.Choices) == 0 {
 		return nil, fmt.Errorf("bungkus: %s returned no choices", c.name)
 	}
-	m := out.Choices[0].Message
-	resp := &ChatResponse{Message{Role: "assistant", Content: m.Content}}
-	for _, tc := range m.ToolCalls {
+	ch := out.Choices[0]
+	resp := &ChatResponse{Message: Message{Role: "assistant", Content: ch.Message.Content}, FinishReason: ch.FinishReason, Usage: out.Usage}
+	for _, tc := range ch.Message.ToolCalls {
 		resp.ToolCalls = append(resp.ToolCalls, ToolCall{ID: tc.ID, Name: tc.Function.Name, Arguments: tc.Function.Arguments})
 	}
 	return resp, nil
@@ -86,12 +104,14 @@ func (c *client) chatCompletions(ctx context.Context, req *ChatRequest) (*ChatRe
 func (c *client) chatCompletionsStream(ctx context.Context, req *ChatRequest) iter.Seq2[*ChatResponse, error] {
 	body := c.chatCompletionsBody(req)
 	body["stream"] = true
-	var calls []ToolCall
-	parse := func(data []byte) (string, error) {
+	body["stream_options"] = map[string]any{"include_usage": true}
+	return c.stream(ctx, "/chat/completions", body, func(data []byte, final *ChatResponse) (string, error) {
 		var ev struct {
 			Choices []struct {
-				Delta ccReply `json:"delta"`
+				Delta        ccReply `json:"delta"`
+				FinishReason string  `json:"finish_reason"`
 			} `json:"choices"`
+			Usage *Usage `json:"usage"`
 			Error *struct {
 				Message string `json:"message"`
 			} `json:"error"`
@@ -102,37 +122,37 @@ func (c *client) chatCompletionsStream(ctx context.Context, req *ChatRequest) it
 		if ev.Error != nil {
 			return "", fmt.Errorf("bungkus: %s stream error: %s", c.name, ev.Error.Message)
 		}
-		if len(ev.Choices) == 0 { // e.g. the final usage chunk
+		if ev.Usage != nil {
+			final.Usage = *ev.Usage
+		}
+		if len(ev.Choices) == 0 { // the usage-only chunk at the end
 			return "", nil
 		}
-		d := ev.Choices[0].Delta
+		ch := ev.Choices[0]
+		if ch.FinishReason != "" {
+			final.FinishReason = ch.FinishReason
+		}
 		// A tool call arrives in pieces: the first delta has its id and name,
 		// later ones append to its arguments. index says which call a piece belongs to.
-		for _, tc := range d.ToolCalls {
-			i := len(calls)
+		calls := &final.ToolCalls
+		for _, tc := range ch.Delta.ToolCalls {
+			i := len(*calls)
 			if tc.Index != nil {
 				i = *tc.Index
 			} else if tc.ID == "" && i > 0 {
 				i-- // no index: a piece without an id continues the last call
 			}
-			for len(calls) <= i {
-				calls = append(calls, ToolCall{})
+			for len(*calls) <= i {
+				*calls = append(*calls, ToolCall{})
 			}
 			if tc.ID != "" {
-				calls[i].ID = tc.ID
+				(*calls)[i].ID = tc.ID
 			}
 			if tc.Function.Name != "" {
-				calls[i].Name = tc.Function.Name
+				(*calls)[i].Name = tc.Function.Name
 			}
-			calls[i].Arguments += tc.Function.Arguments
+			(*calls)[i].Arguments += tc.Function.Arguments
 		}
-		return d.Content, nil
-	}
-	done := func() *ChatResponse {
-		if len(calls) == 0 {
-			return nil
-		}
-		return &ChatResponse{Message{Role: "assistant", ToolCalls: calls}}
-	}
-	return c.stream(ctx, "/chat/completions", body, parse, done)
+		return ch.Delta.Content, nil
+	})
 }

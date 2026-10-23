@@ -35,14 +35,57 @@ type anthMessage struct {
 	toolResult bool
 }
 
+type anthUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+}
+
+// merge copies the non-zero counts from o; stream events report usage piecemeal.
+func (u *anthUsage) merge(o anthUsage) {
+	for _, f := range []struct {
+		dst *int
+		src int
+	}{
+		{&u.InputTokens, o.InputTokens}, {&u.OutputTokens, o.OutputTokens},
+		{&u.CacheCreationInputTokens, o.CacheCreationInputTokens}, {&u.CacheReadInputTokens, o.CacheReadInputTokens},
+	} {
+		if f.src != 0 {
+			*f.dst = f.src
+		}
+	}
+}
+
+func (u anthUsage) usage() Usage {
+	in := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+	return Usage{PromptTokens: in, CompletionTokens: u.OutputTokens, TotalTokens: in + u.OutputTokens}
+}
+
+func anthFinishReason(stop string) string {
+	switch stop {
+	case "end_turn", "stop_sequence":
+		return FinishStop
+	case "max_tokens":
+		return FinishLength
+	case "tool_use":
+		return FinishToolCalls
+	case "refusal":
+		return FinishContentFilter
+	}
+	return stop
+}
+
 func (p *Anthropic) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
 	var out struct {
-		Content []anthBlock `json:"content"`
+		Content    []anthBlock `json:"content"`
+		StopReason string      `json:"stop_reason"`
+		Usage      anthUsage   `json:"usage"`
 	}
 	if err := p.post(ctx, "/messages", messagesBody(req), &out); err != nil {
 		return nil, err
 	}
-	resp := &ChatResponse{Message{Role: "assistant"}}
+	resp := &ChatResponse{Message: Message{Role: "assistant"}, FinishReason: anthFinishReason(out.StopReason), Usage: out.Usage.usage()}
 	var sb strings.Builder
 	for _, b := range out.Content {
 		switch b.Type {
@@ -59,18 +102,23 @@ func (p *Anthropic) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, 
 func (p *Anthropic) ChatStream(ctx context.Context, req *ChatRequest) iter.Seq2[*ChatResponse, error] {
 	body := messagesBody(req)
 	body["stream"] = true
-	var calls []ToolCall
-	callAt := map[int]int{} // content block index -> position in calls
-	parse := func(data []byte) (string, error) {
+	callAt := map[int]int{} // content block index -> position in final.ToolCalls
+	var usage anthUsage
+	return p.stream(ctx, "/messages", body, func(data []byte, final *ChatResponse) (string, error) {
 		var ev struct {
 			Type         string    `json:"type"`
 			Index        int       `json:"index"`
 			ContentBlock anthBlock `json:"content_block"`
-			Delta        struct {
+			Message      struct {
+				Usage anthUsage `json:"usage"`
+			} `json:"message"`
+			Delta struct {
 				Type        string `json:"type"`
 				Text        string `json:"text"`
 				PartialJSON string `json:"partial_json"`
+				StopReason  string `json:"stop_reason"`
 			} `json:"delta"`
+			Usage anthUsage `json:"usage"`
 			Error struct {
 				Message string `json:"message"`
 			} `json:"error"`
@@ -79,10 +127,13 @@ func (p *Anthropic) ChatStream(ctx context.Context, req *ChatRequest) iter.Seq2[
 			return "", err
 		}
 		switch ev.Type {
+		case "message_start":
+			usage.merge(ev.Message.Usage)
+			final.Usage = usage.usage()
 		case "content_block_start":
 			if ev.ContentBlock.Type == "tool_use" {
-				callAt[ev.Index] = len(calls)
-				calls = append(calls, ToolCall{ID: ev.ContentBlock.ID, Name: ev.ContentBlock.Name})
+				callAt[ev.Index] = len(final.ToolCalls)
+				final.ToolCalls = append(final.ToolCalls, ToolCall{ID: ev.ContentBlock.ID, Name: ev.ContentBlock.Name})
 			}
 		case "content_block_delta":
 			switch ev.Delta.Type {
@@ -90,26 +141,22 @@ func (p *Anthropic) ChatStream(ctx context.Context, req *ChatRequest) iter.Seq2[
 				return ev.Delta.Text, nil
 			case "input_json_delta":
 				if i, ok := callAt[ev.Index]; ok {
-					calls[i].Arguments += ev.Delta.PartialJSON
+					final.ToolCalls[i].Arguments += ev.Delta.PartialJSON
 				}
 			}
+		case "content_block_stop":
+			if i, ok := callAt[ev.Index]; ok && final.ToolCalls[i].Arguments == "" {
+				final.ToolCalls[i].Arguments = "{}" // a tool with no arguments streams no input_json_delta
+			}
+		case "message_delta":
+			final.FinishReason = anthFinishReason(ev.Delta.StopReason)
+			usage.merge(ev.Usage)
+			final.Usage = usage.usage()
 		case "error":
 			return "", fmt.Errorf("bungkus: anthropic stream error: %s", ev.Error.Message)
 		}
 		return "", nil
-	}
-	done := func() *ChatResponse {
-		if len(calls) == 0 {
-			return nil
-		}
-		for i := range calls {
-			if calls[i].Arguments == "" {
-				calls[i].Arguments = "{}" // a tool with no arguments streams no input_json_delta
-			}
-		}
-		return &ChatResponse{Message{Role: "assistant", ToolCalls: calls}}
-	}
-	return p.stream(ctx, "/messages", body, parse, done)
+	})
 }
 
 // messagesBody converts a ChatRequest to the Messages API shape: system messages
@@ -152,6 +199,15 @@ func messagesBody(req *ChatRequest) map[string]any {
 	if len(system) > 0 {
 		body["system"] = strings.Join(system, "\n\n")
 	}
+	if req.Temperature != nil {
+		body["temperature"] = *req.Temperature
+	}
+	if req.TopP != nil {
+		body["top_p"] = *req.TopP
+	}
+	if len(req.Stop) > 0 {
+		body["stop_sequences"] = req.Stop
+	}
 	if len(req.Tools) > 0 {
 		tools := make([]map[string]any, len(req.Tools))
 		for i, t := range req.Tools {
@@ -161,6 +217,15 @@ func messagesBody(req *ChatRequest) map[string]any {
 			}
 		}
 		body["tools"] = tools
+	}
+	switch req.ToolChoice {
+	case "":
+	case "auto", "none":
+		body["tool_choice"] = map[string]any{"type": req.ToolChoice}
+	case "required":
+		body["tool_choice"] = map[string]any{"type": "any"}
+	default:
+		body["tool_choice"] = map[string]any{"type": "tool", "name": req.ToolChoice}
 	}
 	return body
 }

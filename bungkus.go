@@ -46,18 +46,51 @@ type ChatRequest struct {
 	Messages  []Message
 	MaxTokens int // 0 uses the provider default (4096 for anthropic)
 	Tools     []Tool
+
+	// Optional sampling settings; nil or empty leaves the provider default.
+	// Pointers because 0 is a valid value: Temperature: new(0.2).
+	Temperature *float64
+	TopP        *float64
+	Stop        []string
+
+	// ToolChoice is "" (provider default), "auto", "none", "required"
+	// (must call some tool), or a tool name to force that tool.
+	ToolChoice string
+}
+
+// Finish reasons, normalized across providers.
+const (
+	FinishStop          = "stop"           // natural end or a stop sequence
+	FinishLength        = "length"         // hit MaxTokens
+	FinishToolCalls     = "tool_calls"     // the model wants tools run
+	FinishContentFilter = "content_filter" // blocked or refused
+)
+
+// Usage counts tokens. PromptTokens includes cached input tokens.
+type Usage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+func (u *Usage) Add(o Usage) {
+	u.PromptTokens += o.PromptTokens
+	u.CompletionTokens += o.CompletionTokens
+	u.TotalTokens += o.TotalTokens
 }
 
 // ChatResponse is the assistant's reply. Append resp.Message to the history
 // to continue the conversation, e.g. after running its ToolCalls.
 type ChatResponse struct {
 	Message
+	FinishReason string // one of the Finish constants, or the provider's own value if unknown
+	Usage        Usage
 }
 
 type Provider interface {
 	Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error)
-	// ChatStream yields text deltas as they arrive, then one final chunk holding
-	// the complete ToolCalls if the model called any. Stop ranging to cancel.
+	// ChatStream yields text deltas as they arrive. The last chunk has no text;
+	// it carries the complete ToolCalls, FinishReason and Usage. Stop ranging to cancel.
 	ChatStream(ctx context.Context, req *ChatRequest) iter.Seq2[*ChatResponse, error]
 }
 
@@ -124,10 +157,10 @@ func newClient(name, baseURL string, headers map[string]string, opts []Option) c
 	return c
 }
 
-// stream reads a server-sent events response, passing each data payload to parse
-// and yielding the non-empty text it returns. At the end it yields done's result,
-// if non-nil, which carries the tool calls parse accumulated.
-func (c *client) stream(ctx context.Context, path string, body any, parse func(data []byte) (string, error), done func() *ChatResponse) iter.Seq2[*ChatResponse, error] {
+// stream reads a server-sent events response. parse handles each data payload:
+// it returns any text delta to yield now, and records tool calls, finish reason
+// and usage on final, which is yielded as the last chunk.
+func (c *client) stream(ctx context.Context, path string, body any, parse func(data []byte, final *ChatResponse) (string, error)) iter.Seq2[*ChatResponse, error] {
 	return func(yield func(*ChatResponse, error) bool) {
 		resp, err := c.do(ctx, path, body)
 		if err != nil {
@@ -135,6 +168,7 @@ func (c *client) stream(ctx context.Context, path string, body any, parse func(d
 			return
 		}
 		defer resp.Body.Close()
+		final := &ChatResponse{Message: Message{Role: "assistant"}}
 		sc := bufio.NewScanner(resp.Body)
 		sc.Buffer(make([]byte, 64*1024), 1<<20)
 		for sc.Scan() {
@@ -146,12 +180,12 @@ func (c *client) stream(ctx context.Context, path string, body any, parse func(d
 			if string(data) == "[DONE]" {
 				break
 			}
-			text, err := parse(data)
+			text, err := parse(data, final)
 			if err != nil {
 				yield(nil, err)
 				return
 			}
-			if text != "" && !yield(&ChatResponse{Message{Role: "assistant", Content: text}}, nil) {
+			if text != "" && !yield(&ChatResponse{Message: Message{Role: "assistant", Content: text}}, nil) {
 				return
 			}
 		}
@@ -159,9 +193,7 @@ func (c *client) stream(ctx context.Context, path string, body any, parse func(d
 			yield(nil, err)
 			return
 		}
-		if final := done(); final != nil {
-			yield(final, nil)
-		}
+		yield(final, nil)
 	}
 }
 
