@@ -50,6 +50,40 @@ for chunk, err := range p.ChatStream(ctx, req) {
 
 Breaking out of the loop closes the connection.
 
+### Tool calling
+
+```go
+req := &bungkus.ChatRequest{
+	Model: "gpt-5",
+	Tools: []bungkus.Tool{{
+		Name:        "get_weather",
+		Description: "Current weather for a city",
+		Parameters:  json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`),
+	}},
+	Messages: []bungkus.Message{{Role: "user", Content: "Weather in Bali?"}},
+}
+
+for {
+	resp, err := p.Chat(ctx, req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	req.Messages = append(req.Messages, resp.Message)
+	if len(resp.ToolCalls) == 0 {
+		fmt.Println(resp.Content)
+		break
+	}
+	for _, call := range resp.ToolCalls {
+		result := runTool(call.Name, call.Arguments) // your code; Arguments is a JSON object
+		req.Messages = append(req.Messages, bungkus.Message{Role: "tool", ToolCallID: call.ID, Content: result})
+	}
+}
+```
+
+The same `Message` history works for every provider: for Anthropic, bungkus converts
+tool calls to `tool_use` blocks and groups consecutive tool results into one user turn.
+With `ChatStream`, text arrives as deltas and the complete `ToolCalls` arrive in the last chunk.
+
 ### Choosing a provider from config
 
 ```go
@@ -95,7 +129,7 @@ var llm LLM = bungkus.NewOpenAI(key)
 
 ## Not yet supported
 
-Tool calling, images, temperature and other sampling parameters, usage/token counts.
+Images, temperature and other sampling parameters, tool choice, usage/token counts.
 
 ## License
 

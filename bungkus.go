@@ -15,24 +15,49 @@ import (
 )
 
 type Message struct {
-	Role    string `json:"role"` // "system", "user", "assistant"
-	Content string `json:"content"`
+	Role       string     `json:"role"` // "system", "user", "assistant", "tool"
+	Content    string     `json:"content"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // assistant: the tools the model wants called
+	ToolCallID string     `json:"tool_call_id,omitempty"` // tool: the ToolCall.ID this result answers
+}
+
+// Tool describes a function the model may call.
+type Tool struct {
+	Name        string
+	Description string
+	Parameters  json.RawMessage // JSON Schema of the arguments object; nil means no arguments
+}
+
+func (t Tool) schema() json.RawMessage {
+	if len(t.Parameters) == 0 {
+		return json.RawMessage(`{"type":"object","properties":{}}`)
+	}
+	return t.Parameters
+}
+
+type ToolCall struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"` // JSON object matching the tool's Parameters
 }
 
 type ChatRequest struct {
 	Model     string // for azure the deployment name, for byteplus the model or endpoint ID
 	Messages  []Message
 	MaxTokens int // 0 uses the provider default (4096 for anthropic)
+	Tools     []Tool
 }
 
-// ChatResponse is a full reply from Chat, or one text delta from ChatStream.
+// ChatResponse is the assistant's reply. Append resp.Message to the history
+// to continue the conversation, e.g. after running its ToolCalls.
 type ChatResponse struct {
-	Content string
+	Message
 }
 
 type Provider interface {
 	Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error)
-	// ChatStream yields text deltas as they arrive. Stop ranging to cancel.
+	// ChatStream yields text deltas as they arrive, then one final chunk holding
+	// the complete ToolCalls if the model called any. Stop ranging to cancel.
 	ChatStream(ctx context.Context, req *ChatRequest) iter.Seq2[*ChatResponse, error]
 }
 
@@ -99,58 +124,10 @@ func newClient(name, baseURL string, headers map[string]string, opts []Option) c
 	return c
 }
 
-func (c *client) chatCompletionsBody(req *ChatRequest) map[string]any {
-	body := map[string]any{"model": req.Model, "messages": req.Messages}
-	if req.MaxTokens > 0 {
-		body[c.maxTokensField] = req.MaxTokens
-	}
-	return body
-}
-
-// chatCompletions calls an OpenAI-compatible /chat/completions endpoint.
-func (c *client) chatCompletions(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
-	var out struct {
-		Choices []struct {
-			Message Message `json:"message"`
-		} `json:"choices"`
-	}
-	if err := c.post(ctx, "/chat/completions", c.chatCompletionsBody(req), &out); err != nil {
-		return nil, err
-	}
-	if len(out.Choices) == 0 {
-		return nil, fmt.Errorf("bungkus: %s returned no choices", c.name)
-	}
-	return &ChatResponse{Content: out.Choices[0].Message.Content}, nil
-}
-
-func (c *client) chatCompletionsStream(ctx context.Context, req *ChatRequest) iter.Seq2[*ChatResponse, error] {
-	body := c.chatCompletionsBody(req)
-	body["stream"] = true
-	return c.stream(ctx, "/chat/completions", body, func(data []byte) (string, error) {
-		var ev struct {
-			Choices []struct {
-				Delta Message `json:"delta"`
-			} `json:"choices"`
-			Error *struct {
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		if err := json.Unmarshal(data, &ev); err != nil {
-			return "", err
-		}
-		if ev.Error != nil {
-			return "", fmt.Errorf("bungkus: %s stream error: %s", c.name, ev.Error.Message)
-		}
-		if len(ev.Choices) == 0 { // e.g. the final usage chunk
-			return "", nil
-		}
-		return ev.Choices[0].Delta.Content, nil
-	})
-}
-
 // stream reads a server-sent events response, passing each data payload to parse
-// and yielding the non-empty text it returns.
-func (c *client) stream(ctx context.Context, path string, body any, parse func(data []byte) (string, error)) iter.Seq2[*ChatResponse, error] {
+// and yielding the non-empty text it returns. At the end it yields done's result,
+// if non-nil, which carries the tool calls parse accumulated.
+func (c *client) stream(ctx context.Context, path string, body any, parse func(data []byte) (string, error), done func() *ChatResponse) iter.Seq2[*ChatResponse, error] {
 	return func(yield func(*ChatResponse, error) bool) {
 		resp, err := c.do(ctx, path, body)
 		if err != nil {
@@ -167,19 +144,23 @@ func (c *client) stream(ctx context.Context, path string, body any, parse func(d
 			}
 			data = bytes.TrimSpace(data)
 			if string(data) == "[DONE]" {
-				return
+				break
 			}
 			text, err := parse(data)
 			if err != nil {
 				yield(nil, err)
 				return
 			}
-			if text != "" && !yield(&ChatResponse{Content: text}, nil) {
+			if text != "" && !yield(&ChatResponse{Message{Role: "assistant", Content: text}}, nil) {
 				return
 			}
 		}
 		if err := sc.Err(); err != nil {
 			yield(nil, err)
+			return
+		}
+		if final := done(); final != nil {
+			yield(final, nil)
 		}
 	}
 }

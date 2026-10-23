@@ -37,7 +37,7 @@ func TestChat(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	req := &ChatRequest{Model: "m", MaxTokens: 100, Messages: []Message{{"system", "be nice"}, {"user", "hello"}}}
+	req := &ChatRequest{Model: "m", MaxTokens: 100, Messages: []Message{{Role: "system", Content: "be nice"}, {Role: "user", Content: "hello"}}}
 	for _, name := range []string{"openai", "anthropic", "azure", "byteplus", "deepseek"} {
 		p, err := New(name, "k", WithBaseURL(srv.URL+"/"))
 		if err != nil {
@@ -87,7 +87,7 @@ func TestChatStream(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	req := &ChatRequest{Model: "m", Messages: []Message{{"user", "hello"}}}
+	req := &ChatRequest{Model: "m", Messages: []Message{{Role: "user", Content: "hello"}}}
 	for _, name := range []string{"openai", "anthropic", "azure", "byteplus", "deepseek"} {
 		p, _ := New(name, "k", WithBaseURL(srv.URL))
 		var got string
