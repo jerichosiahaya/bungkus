@@ -126,3 +126,27 @@ func TestNode(t *testing.T) {
 		t.Errorf("infos: %+v", got)
 	}
 }
+
+func TestSchemaMoreTypes(t *testing.T) {
+	type more struct {
+		Flag bool
+		Raw  []byte `json:"raw"`
+		Any  any    `json:"any"`
+		Grid [2]int `json:"grid"`
+	}
+	var got map[string]any
+	json.Unmarshal(New("x", "", func(context.Context, *more) (string, error) { return "", nil }).Info().Parameters, &got)
+	props := got["properties"].(map[string]any)
+	for name, want := range map[string]any{"Flag": "boolean", "raw": "string", "any": nil, "grid": "array"} {
+		if p := props[name].(map[string]any); p["type"] != want {
+			t.Errorf("%s: got %v", name, p)
+		}
+	}
+}
+
+func TestInvokeToolError(t *testing.T) {
+	tl := New("x", "", func(context.Context, struct{}) (int, error) { return 0, errors.New("down") })
+	if _, err := tl.Invoke(context.Background(), "{}"); err == nil || errors.Is(err, ErrInvalidArguments) {
+		t.Errorf("want plain tool error, got %v", err)
+	}
+}

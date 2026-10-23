@@ -49,10 +49,7 @@ func New[In, Out any](name, description string, fn func(context.Context, In) (Ou
 	if t.Kind() != reflect.Struct {
 		panic(fmt.Sprintf("tool.New(%q): arguments type %s must be a struct", name, t))
 	}
-	params, err := json.Marshal(schemaOf(t, map[reflect.Type]bool{}))
-	if err != nil {
-		panic(fmt.Sprintf("tool.New(%q): %v", name, err))
-	}
+	params, _ := json.Marshal(schemaOf(t, map[reflect.Type]bool{})) // only strings, maps and slices: cannot fail
 	return &funcTool[In, Out]{info: bungkus.Tool{Name: name, Description: description, Parameters: params}, fn: fn}
 }
 

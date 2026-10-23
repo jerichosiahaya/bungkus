@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: write # to publish the coverage badge to the badges branch
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go: ["1.25", "stable"] # minimum from go.mod, and latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+      - run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - run: go vet ./...
+      - run: go test -race -coverprofile=cover.out ./...
+
+      - name: Publish coverage badge
+        if: github.event_name == 'push' && matrix.go == 'stable'
+        run: |
+          pct=$(go tool cover -func=cover.out | awk '/^total:/ {sub("%", "", $3); print $3}')
+          color=$(awk -v p="$pct" 'BEGIN {print (p >= 90) ? "brightgreen" : (p >= 75) ? "yellow" : "red"}')
+          echo "{\"schemaVersion\":1,\"label\":\"coverage\",\"message\":\"${pct}%\",\"color\":\"${color}\"}" > "$RUNNER_TEMP/coverage.json"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch origin badges; then git switch badges; else git switch --orphan badges; fi
+          cp "$RUNNER_TEMP/coverage.json" coverage.json
+          git add coverage.json
+          git diff --cached --quiet || { git commit -m "Update coverage to ${pct}%"; git push origin badges; }

@@ -80,3 +80,26 @@ func TestReActMaxSteps(t *testing.T) {
 		t.Errorf("got %v, %d messages", err, len(res.Messages))
 	}
 }
+
+type errModel struct{ fakeModel }
+
+func (*errModel) Chat(context.Context, *bungkus.ChatRequest) (*bungkus.ChatResponse, error) {
+	return nil, errors.New("model down")
+}
+
+func TestReActErrors(t *testing.T) {
+	if _, err := (&ReAct{Provider: &errModel{}}).Run(context.Background(), nil); err == nil {
+		t.Error("want model error")
+	}
+
+	broken := tool.New("weather", "", func(context.Context, struct{}) (string, error) { return "", errors.New("api down") })
+	res, err := (&ReAct{Provider: &fakeModel{replies: []*bungkus.ChatResponse{callWeather("1")}}, Tools: []tool.Invokable{broken}}).
+		Run(context.Background(), nil)
+	if err == nil || len(res.Messages) != 1 {
+		t.Errorf("want tool error with the assistant turn kept, got %v, %+v", err, res)
+	}
+
+	if (&Result{}).Answer() != "" {
+		t.Error("empty result should have empty answer")
+	}
+}

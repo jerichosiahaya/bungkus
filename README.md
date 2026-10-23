@@ -1,5 +1,10 @@
 # bungkus
 
+[![CI](https://github.com/jerichosiahaya/bungkus/actions/workflows/ci.yml/badge.svg)](https://github.com/jerichosiahaya/bungkus/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jerichosiahaya/bungkus/badges/coverage.json)](https://github.com/jerichosiahaya/bungkus/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/jerichosiahaya/bungkus.svg)](https://pkg.go.dev/github.com/jerichosiahaya/bungkus)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 *Bungkus* is Indonesian for "wrap". A small Go client that wraps the chat APIs of
 five LLM providers behind one interface. Standard library only, no dependencies.
 
@@ -194,6 +199,15 @@ var llm LLM = bungkus.NewOpenAI(key)
 ## Not yet supported
 
 Images and files, reasoning/thinking output, provider-native JSON mode, agent streaming.
+
+## Development
+
+```sh
+go test -race -cover ./...
+```
+
+Tests run against local fake servers; no API keys needed. CI runs them on Go 1.25 and
+the latest Go, and publishes the coverage badge from `main`.
 
 ## License
 
