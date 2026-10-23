@@ -1,6 +1,5 @@
 // Package bungkus is a minimal chat client for OpenAI, Anthropic, Azure OpenAI,
-// BytePlus ModelArk and DeepSeek. Everything except Anthropic speaks the
-// OpenAI chat-completions format, so there are only two wire formats.
+// BytePlus ModelArk and DeepSeek. Each provider lives in its own file.
 package bungkus
 
 import (
@@ -18,106 +17,66 @@ type Message struct {
 	Content string `json:"content"`
 }
 
-type Client struct {
-	Provider string // openai, anthropic, azure, byteplus, deepseek
-	BaseURL  string
-	APIKey   string
-	HTTP     *http.Client
+type Provider interface {
+	// Chat sends messages and returns the assistant's text reply.
+	Chat(ctx context.Context, model string, msgs []Message) (string, error)
 }
 
-var defaultBaseURL = map[string]string{
-	"openai":    "https://api.openai.com/v1",
-	"anthropic": "https://api.anthropic.com/v1",
-	"byteplus":  "https://ark.ap-southeast.bytepluses.com/api/v3",
-	"deepseek":  "https://api.deepseek.com/v1",
-	// azure has no default: https://<resource>.openai.azure.com/openai/v1
+// New returns a provider by name: openai, anthropic, azure, byteplus, deepseek.
+// baseURL may be empty to use the provider's default, except for azure.
+func New(provider, baseURL, apiKey string) (Provider, error) {
+	switch provider {
+	case "openai":
+		return &OpenAI{BaseURL: baseURL, APIKey: apiKey}, nil
+	case "anthropic":
+		return &Anthropic{BaseURL: baseURL, APIKey: apiKey}, nil
+	case "azure":
+		if baseURL == "" {
+			return nil, fmt.Errorf("bungkus: azure needs a base URL like https://<resource>.openai.azure.com/openai/v1")
+		}
+		return &Azure{BaseURL: baseURL, APIKey: apiKey}, nil
+	case "byteplus":
+		return &BytePlus{BaseURL: baseURL, APIKey: apiKey}, nil
+	case "deepseek":
+		return &DeepSeek{BaseURL: baseURL, APIKey: apiKey}, nil
+	}
+	return nil, fmt.Errorf("bungkus: unknown provider %q", provider)
 }
 
-// New returns a client. baseURL may be empty except for azure.
-func New(provider, baseURL, apiKey string) (*Client, error) {
-	if baseURL == "" {
-		baseURL = defaultBaseURL[provider]
-	}
-	if baseURL == "" {
-		return nil, fmt.Errorf("bungkus: unknown provider %q or missing base URL", provider)
-	}
-	return &Client{Provider: provider, BaseURL: strings.TrimRight(baseURL, "/"), APIKey: apiKey, HTTP: http.DefaultClient}, nil
-}
-
-// Chat sends messages and returns the assistant's text reply.
-// For azure, model is the deployment name; for byteplus, the endpoint/model ID.
-func (c *Client) Chat(ctx context.Context, model string, msgs []Message) (string, error) {
-	if c.Provider == "anthropic" {
-		return c.chatAnthropic(ctx, model, msgs)
-	}
+// chatCompletions calls an OpenAI-compatible /chat/completions endpoint.
+func chatCompletions(ctx context.Context, hc *http.Client, name, baseURL string, headers map[string]string, model string, msgs []Message) (string, error) {
 	var out struct {
 		Choices []struct {
 			Message Message `json:"message"`
 		} `json:"choices"`
 	}
 	body := map[string]any{"model": model, "messages": msgs}
-	if err := c.post(ctx, "/chat/completions", body, &out); err != nil {
+	if err := post(ctx, hc, name, baseURL+"/chat/completions", headers, body, &out); err != nil {
 		return "", err
 	}
 	if len(out.Choices) == 0 {
-		return "", fmt.Errorf("bungkus: %s returned no choices", c.Provider)
+		return "", fmt.Errorf("bungkus: %s returned no choices", name)
 	}
 	return out.Choices[0].Message.Content, nil
 }
 
-func (c *Client) chatAnthropic(ctx context.Context, model string, msgs []Message) (string, error) {
-	var system []string
-	var rest []Message
-	for _, m := range msgs {
-		if m.Role == "system" {
-			system = append(system, m.Content)
-		} else {
-			rest = append(rest, m)
-		}
-	}
-	// ponytail: fixed max_tokens (Anthropic requires it); add an options param when callers need to tune it
-	body := map[string]any{"model": model, "messages": rest, "max_tokens": 4096}
-	if len(system) > 0 {
-		body["system"] = strings.Join(system, "\n\n")
-	}
-	var out struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if err := c.post(ctx, "/messages", body, &out); err != nil {
-		return "", err
-	}
-	var sb strings.Builder
-	for _, b := range out.Content {
-		if b.Type == "text" {
-			sb.WriteString(b.Text)
-		}
-	}
-	return sb.String(), nil
-}
-
-func (c *Client) post(ctx context.Context, path string, body, out any) error {
+func post(ctx context.Context, hc *http.Client, name, url string, headers map[string]string, body, out any) error {
 	b, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(b))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	switch c.Provider {
-	case "anthropic":
-		req.Header.Set("x-api-key", c.APIKey)
-		req.Header.Set("anthropic-version", "2023-06-01")
-	case "azure":
-		req.Header.Set("api-key", c.APIKey)
-	default:
-		req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
-	resp, err := c.HTTP.Do(req)
+	if hc == nil {
+		hc = http.DefaultClient
+	}
+	resp, err := hc.Do(req)
 	if err != nil {
 		return err
 	}
@@ -127,7 +86,14 @@ func (c *Client) post(ctx context.Context, path string, body, out any) error {
 		return err
 	}
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("bungkus: %s %d: %s", c.Provider, resp.StatusCode, raw)
+		return fmt.Errorf("bungkus: %s %d: %s", name, resp.StatusCode, raw)
 	}
 	return json.Unmarshal(raw, out)
+}
+
+func baseOr(baseURL, def string) string {
+	if baseURL == "" {
+		return def
+	}
+	return strings.TrimRight(baseURL, "/")
 }

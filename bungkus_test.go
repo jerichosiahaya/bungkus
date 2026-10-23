@@ -31,14 +31,20 @@ func TestChat(t *testing.T) {
 	defer srv.Close()
 
 	msgs := []Message{{"system", "be nice"}, {"user", "hello"}}
-	for _, p := range []string{"openai", "anthropic", "azure", "byteplus", "deepseek"} {
-		c, _ := New(p, srv.URL, "k")
-		got, err := c.Chat(context.Background(), "m", msgs)
+	for _, name := range []string{"openai", "anthropic", "azure", "byteplus", "deepseek"} {
+		p, err := New(name, srv.URL+"/", "k")
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := p.Chat(context.Background(), "m", msgs)
 		if err != nil || got != "hi" {
-			t.Errorf("%s: got %q, %v", p, got, err)
+			t.Errorf("%s: got %q, %v", name, got, err)
 		}
 	}
 	if _, err := New("azure", "", "k"); err == nil {
 		t.Error("azure without base URL should fail")
+	}
+	if _, err := New("nope", "", "k"); err == nil {
+		t.Error("unknown provider should fail")
 	}
 }
