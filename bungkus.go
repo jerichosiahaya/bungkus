@@ -48,7 +48,7 @@ type ChatRequest struct {
 	Tools     []Tool
 
 	// Optional sampling settings; nil or empty leaves the provider default.
-	// Pointers because 0 is a valid value: Temperature: new(0.2).
+	// Pointers because 0 is a valid value; on Go 1.26+ write Temperature: new(0.2).
 	Temperature *float64
 	TopP        *float64
 	Stop        []string

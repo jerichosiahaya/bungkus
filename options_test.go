@@ -63,9 +63,10 @@ func TestOptionsUsageFinish(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	zero, topP := 0.0, 0.9
 	req := &ChatRequest{
 		Model: "m", Messages: []Message{{Role: "user", Content: "hello"}},
-		Temperature: new(0.0), TopP: new(0.9), Stop: []string{"END"}, ToolChoice: "weather",
+		Temperature: &zero, TopP: &topP, Stop: []string{"END"}, ToolChoice: "weather",
 		Tools: []Tool{{Name: "weather"}},
 	}
 	want := Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}

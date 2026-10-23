@@ -17,7 +17,7 @@ five LLM providers behind one interface. Standard library only, no dependencies.
 go get github.com/jerichosiahaya/bungkus
 ```
 
-Requires Go 1.23+ for range-over-func streaming.
+Requires Go 1.25+.
 
 ## Usage
 
@@ -35,6 +35,21 @@ if err != nil {
 	log.Fatal(err)
 }
 fmt.Println(resp.Content)
+fmt.Println(resp.FinishReason, resp.Usage.TotalTokens) // "stop", "length", "tool_calls" or "content_filter"
+```
+
+### Request options
+
+```go
+req := &bungkus.ChatRequest{
+	Model:       "deepseek-chat",
+	Messages:    msgs,
+	MaxTokens:   1024,
+	Temperature: new(0.2), // pointer, since 0 is valid; new(value) needs Go 1.26+
+	TopP:        new(0.9),
+	Stop:        []string{"\n\n"},
+	ToolChoice:  "required", // "auto", "none", "required", or a tool name
+}
 ```
 
 ### Streaming
@@ -48,20 +63,66 @@ for chunk, err := range p.ChatStream(ctx, req) {
 }
 ```
 
-Breaking out of the loop closes the connection.
+Breaking out of the loop closes the connection. The last chunk has no text; it
+carries `FinishReason`, `Usage` and any complete `ToolCalls`.
 
-### Tool calling
+### Tools from Go functions
+
+`tool.New` builds the JSON Schema from a struct, so the model's arguments arrive typed:
 
 ```go
-req := &bungkus.ChatRequest{
-	Model: "gpt-5",
-	Tools: []bungkus.Tool{{
-		Name:        "get_weather",
-		Description: "Current weather for a city",
-		Parameters:  json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`),
-	}},
-	Messages: []bungkus.Message{{Role: "user", Content: "Weather in Bali?"}},
+import "github.com/jerichosiahaya/bungkus/tool"
+
+type WeatherArgs struct {
+	City string `json:"city" desc:"City name"`
+	Unit string `json:"unit,omitempty" enum:"celsius,fahrenheit"`
 }
+
+weather := tool.New("get_weather", "Current weather for a city",
+	func(ctx context.Context, a WeatherArgs) (string, error) {
+		return "31°C and sunny in " + a.City, nil
+	})
+```
+
+Fields are required unless they are pointers or `omitempty`. `desc` sets a description,
+`enum` lists allowed values. A non-string return value is sent to the model as JSON.
+
+### Agents
+
+`agent.ReAct` loops: call the model, run the tools it asks for (in parallel), feed
+the results back, until it answers.
+
+```go
+import "github.com/jerichosiahaya/bungkus/agent"
+
+a := &agent.ReAct{
+	Provider: bungkus.NewAnthropic(key),
+	Request: bungkus.ChatRequest{
+		Model:    "claude-sonnet-5-5",
+		Messages: []bungkus.Message{{Role: "system", Content: "You are a travel assistant."}},
+	},
+	Tools:    []tool.Invokable{weather},
+	MaxSteps: 10, // model calls per Run
+}
+
+res, err := a.Run(ctx, []bungkus.Message{{Role: "user", Content: "Should I pack an umbrella for Bali?"}})
+fmt.Println(res.Answer(), res.Usage.TotalTokens)
+history = append(history, res.Messages...) // tool calls, tool results and the answer
+```
+
+When a tool gets bad arguments or the model names an unknown tool, the error goes
+back to the model so it can retry. An error your tool function returns stops the run.
+
+### Tool calling by hand
+
+Without the `tool` and `agent` packages, set `Tools` and run the loop yourself:
+
+```go
+req.Tools = []bungkus.Tool{{
+	Name:        "get_weather",
+	Description: "Current weather for a city",
+	Parameters:  json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`),
+}}
 
 for {
 	resp, err := p.Chat(ctx, req)
@@ -70,11 +131,10 @@ for {
 	}
 	req.Messages = append(req.Messages, resp.Message)
 	if len(resp.ToolCalls) == 0 {
-		fmt.Println(resp.Content)
 		break
 	}
 	for _, call := range resp.ToolCalls {
-		result := runTool(call.Name, call.Arguments) // your code; Arguments is a JSON object
+		result := runTool(call.Name, call.Arguments) // Arguments is a JSON object
 		req.Messages = append(req.Messages, bungkus.Message{Role: "tool", ToolCallID: call.ID, Content: result})
 	}
 }
@@ -82,7 +142,11 @@ for {
 
 The same `Message` history works for every provider: for Anthropic, bungkus converts
 tool calls to `tool_use` blocks and groups consecutive tool results into one user turn.
-With `ChatStream`, text arrives as deltas and the complete `ToolCalls` arrive in the last chunk.
+
+### Structured output
+
+Force a tool and read its arguments: `ToolChoice: "extract_invoice"` makes every
+provider return JSON matching that tool's schema in `resp.ToolCalls[0].Arguments`.
 
 ### Choosing a provider from config
 
@@ -129,7 +193,7 @@ var llm LLM = bungkus.NewOpenAI(key)
 
 ## Not yet supported
 
-Images, temperature and other sampling parameters, tool choice, usage/token counts.
+Images and files, reasoning/thinking output, provider-native JSON mode, agent streaming.
 
 ## License
 

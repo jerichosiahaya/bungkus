@@ -35,3 +35,13 @@ func ExampleAnthropic_ChatStream() {
 		fmt.Print(chunk.Content)
 	}
 }
+
+func ExampleChatRequest_options() {
+	temperature := 0.2
+	_ = &bungkus.ChatRequest{
+		Model:       "deepseek-chat",
+		Messages:    []bungkus.Message{{Role: "user", Content: "halo"}},
+		Temperature: &temperature,
+		ToolChoice:  "auto",
+	}
+}
