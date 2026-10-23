@@ -1,20 +1,17 @@
 package bungkus
 
-import (
-	"context"
-	"net/http"
-)
+import "context"
 
-const bytePlusURL = "https://ark.ap-southeast.bytepluses.com/api/v3"
+var _ Provider = (*BytePlus)(nil)
 
-// BytePlus uses ModelArk. model is the model ID or endpoint ID.
-type BytePlus struct {
-	BaseURL string // default https://ark.ap-southeast.bytepluses.com/api/v3
-	APIKey  string
-	HTTP    *http.Client // nil uses http.DefaultClient
+// BytePlus uses ModelArk. ChatRequest.Model is the model ID or endpoint ID.
+type BytePlus struct{ client }
+
+// NewBytePlus returns a ModelArk client using https://ark.ap-southeast.bytepluses.com/api/v3.
+func NewBytePlus(apiKey string, opts ...Option) *BytePlus {
+	return &BytePlus{newClient("byteplus", "https://ark.ap-southeast.bytepluses.com/api/v3", map[string]string{"Authorization": "Bearer " + apiKey}, opts)}
 }
 
-func (p *BytePlus) Chat(ctx context.Context, model string, msgs []Message) (string, error) {
-	h := map[string]string{"Authorization": "Bearer " + p.APIKey}
-	return chatCompletions(ctx, p.HTTP, "byteplus", baseOr(p.BaseURL, bytePlusURL), h, model, msgs)
+func (p *BytePlus) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
+	return p.chatCompletions(ctx, req)
 }

@@ -1,19 +1,16 @@
 package bungkus
 
-import (
-	"context"
-	"net/http"
-)
+import "context"
 
-const deepSeekURL = "https://api.deepseek.com/v1"
+var _ Provider = (*DeepSeek)(nil)
 
-type DeepSeek struct {
-	BaseURL string // default https://api.deepseek.com/v1
-	APIKey  string
-	HTTP    *http.Client // nil uses http.DefaultClient
+type DeepSeek struct{ client }
+
+// NewDeepSeek returns a DeepSeek client using https://api.deepseek.com/v1.
+func NewDeepSeek(apiKey string, opts ...Option) *DeepSeek {
+	return &DeepSeek{newClient("deepseek", "https://api.deepseek.com/v1", map[string]string{"Authorization": "Bearer " + apiKey}, opts)}
 }
 
-func (p *DeepSeek) Chat(ctx context.Context, model string, msgs []Message) (string, error) {
-	h := map[string]string{"Authorization": "Bearer " + p.APIKey}
-	return chatCompletions(ctx, p.HTTP, "deepseek", baseOr(p.BaseURL, deepSeekURL), h, model, msgs)
+func (p *DeepSeek) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
+	return p.chatCompletions(ctx, req)
 }
