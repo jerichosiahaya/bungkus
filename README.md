@@ -449,7 +449,7 @@ Last run of `go test -run Live` against the real APIs:
 | Provider | Model | Date | Chat | Stream | Agent tool loop (Run + Stream) | JSON schema | Image | PDF file |
 |---|---|---|---|---|---|---|---|---|
 | OpenAI | `gpt-5-mini` | 2026-10-30 | pass | pass | pass | pass | pass | pass |
-| DeepSeek | `deepseek-chat` | — | not run yet | | | | n/a | n/a |
+| DeepSeek | `deepseek-chat` | 2026-10-30 | pass | pass | pass | pass (`json_object`) | n/a | n/a |
 | Anthropic | | — | not run yet | | | | | |
 | Azure OpenAI | | — | not run yet | | | | | |
 | BytePlus | | — | not run yet | | | | | n/a |
