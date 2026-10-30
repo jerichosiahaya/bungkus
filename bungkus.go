@@ -1,5 +1,11 @@
-// Package bungkus is a minimal chat client for OpenAI, Anthropic, Azure OpenAI,
+// Package bungkus is a minimal client for OpenAI, Anthropic, Azure OpenAI,
 // BytePlus ModelArk and DeepSeek. Each provider lives in its own file.
+//
+// Every provider implements [Provider] (chat and streaming). OpenAI, Azure and
+// BytePlus also implement [Embedder]. [Decider] asks decision models, which
+// answer yes/no, choice and score questions with probabilities instead of
+// text; OpenAI implements it, and [SystemOne] covers vendors that use the
+// System One (Jev) format.
 package bungkus
 
 import (

@@ -17,6 +17,18 @@ optional `tracing` package depends on OpenTelemetry.
 | Azure OpenAI | `NewAzure(endpoint, key)` | v1 API, endpoint like `https://<resource>.openai.azure.com/openai/v1`; `Model` is the deployment name |
 | BytePlus ModelArk | `NewBytePlus(key)` | `Model` is the model ID or endpoint ID |
 | DeepSeek | `NewDeepSeek(key)` | `reasoning_content` is sent back, which DeepSeek requires once tools are used |
+| Decision models (System One format) | `NewSystemOne(endpoint, key)` | Decisions only; see [Decision models](#decision-models) |
+
+What each one supports:
+
+| | Chat and streaming | Tools | Embeddings | Decisions |
+|---|---|---|---|---|
+| OpenAI | yes | yes | yes | yes (`/decisions`) |
+| Anthropic | yes | yes | | |
+| Azure OpenAI | yes | yes | yes | |
+| BytePlus ModelArk | yes | yes | yes | |
+| DeepSeek | yes | yes | | |
+| `SystemOne` | | | | yes |
 
 ## Install
 
@@ -216,31 +228,77 @@ implement `rag.Retriever` (one method) over your vector database.
 
 ### Decision models
 
-Decision models answer typed questions about an input with probabilities instead of
-text, in one fast pass: yes/no, pick one of several choices, or score on a scale.
+Decision models judge an input and answer typed questions with probabilities instead
+of generated text, in one fast pass. Use them where you would otherwise prompt a chat
+model and parse its reply: routing, classification, guardrails, triage. They cannot
+write text or call tools.
+
+Three question types:
+
+| Type | Asks | Answer fields |
+|---|---|---|
+| `QuestionYesNo` | Is the statement true? | `Probability` that the answer is yes |
+| `QuestionChoice` | Which of these `Choices` fits best? | `Choice`, `Confidence`, `Probabilities` per choice `Value` |
+| `QuestionScore` | Where on this scale? `Choices` are the levels, lowest first | `Score` (expected level index from 0; may fall between levels), `Confidence`, `Probabilities` per level label |
 
 ```go
-resp, err := bungkus.NewOpenAI(key).Decide(ctx, &bungkus.DecideRequest{
+d := bungkus.NewOpenAI(key)
+resp, err := d.Decide(ctx, &bungkus.DecideRequest{
 	Model: "gpt-6-luna",
 	Input: "The package arrived with a broken screen. I want my money back.",
 	Questions: []bungkus.Question{
 		{Name: "damaged", Type: bungkus.QuestionYesNo, Instructions: "Does the customer report a damaged item?"},
 		{Name: "queue", Type: bungkus.QuestionChoice, Instructions: "Which team should handle this?",
-			Choices: []bungkus.Choice{{Value: "billing", Description: "Refunds"}, {Value: "shipping", Description: "Damaged items"}}},
+			Choices: []bungkus.Choice{{Value: "billing", Description: "Refunds and payments"}, {Value: "shipping", Description: "Delivery and damaged items"}}},
 		{Name: "urgency", Type: bungkus.QuestionScore, Instructions: "How urgent is this?",
-			Choices: []bungkus.Choice{{Value: "low"}, {Value: "medium"}, {Value: "high"}}}, // levels, lowest first
+			Choices: []bungkus.Choice{{Value: "low"}, {Value: "medium"}, {Value: "high"}}},
 	},
 })
-damaged, _ := resp.Answer("damaged") // damaged.Probability
-queue, _ := resp.Answer("queue")     // queue.Choice, queue.Confidence, queue.Probabilities
+if err != nil {
+	return err
+}
+
+damaged, _ := resp.Answer("damaged")
+if damaged.Probability > 0.8 {
+	queue, _ := resp.Answer("queue")
+	route(queue.Choice) // "shipping"; queue.Probabilities["billing"] is the runner-up's probability
+}
+urgency, _ := resp.Answer("urgency") // urgency.Score 1.3 means between medium and high
 ```
 
-Two request formats exist, and both return the same `DecideResponse`:
+`resp.Answers` lists the answers in question order. A question the model declines comes
+back with `Type` set to `bungkus.AnswerRefusal`, and the others are answered normally.
+`resp.Usage` counts the tokens; decision models usually bill input tokens only.
 
-| Format | Use | Endpoints |
-|---|---|---|
-| OpenAI `/decisions` | `NewOpenAI(key)`, or `WithBaseURL` for a compatible gateway | OpenAI, Vercel AI Gateway, LLM Gateway `/v1/decisions` |
-| System One (Jev) | `NewSystemOne(endpointURL, key)`; every question needs a `Name`; text only | TypeSafe, AIML API, LLM Gateway `/v1/systemone`, Liquid AI, Microsoft Foundry, Baseten, Upstage |
+**Images.** The OpenAI format accepts images as data URLs in `Parts`, if the model
+supports them:
+
+```go
+req.Parts = []bungkus.Part{{Type: bungkus.PartImage, URL: bungkus.DataURL("image/png", photo)}}
+```
+
+**Two request formats.** Vendors use one of two formats. Both return the same
+`DecideResponse`, so code that reads answers does not change when you switch:
+
+| Format | Constructor | Notes | Served by |
+|---|---|---|---|
+| OpenAI `/decisions` | `NewOpenAI(key)` | Names optional; images allowed | OpenAI, and gateways that copy it (`WithBaseURL`) |
+| System One (Jev) | `NewSystemOne(endpointURL, key)` | Every question needs a unique `Name`; text only | TypeSafe, AIML API, LLM Gateway, Liquid AI, Microsoft Foundry, Baseten, Upstage |
+
+`NewSystemOne` takes the full endpoint URL, because the path differs by vendor:
+
+```go
+// System One format
+jev := bungkus.NewSystemOne("https://api.aimlapi.com/v1/decisions", key)
+resp, err := jev.Decide(ctx, &bungkus.DecideRequest{Model: "typesafe/jev", Input: msg, Questions: qs})
+
+// OpenAI format through a gateway
+gw := bungkus.NewOpenAI(key, bungkus.WithBaseURL("https://ai-gateway.vercel.sh/v1"))
+resp, err = gw.Decide(ctx, &bungkus.DecideRequest{Model: "openai/gpt-6-luna-decisions", Input: msg, Questions: qs})
+```
+
+Both satisfy `bungkus.Decider`, so you can choose the vendor from config. Retries,
+`WithHTTPClient` and the observability handlers work as they do for chat.
 
 ### Tool calling by hand
 
@@ -343,6 +401,8 @@ type LLM interface {
 // in main
 var llm LLM = bungkus.NewOpenAI(key)
 ```
+
+The same works for `bungkus.Embedder`, `bungkus.Decider` and `rag.Retriever`.
 
 ## Not yet supported
 
