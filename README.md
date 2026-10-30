@@ -6,8 +6,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 *Bungkus* is Indonesian for "wrap". A small Go client that wraps the chat APIs of
-five LLM providers behind one interface, with tools, agents, prompt templates and
-observability on top. The core package uses only the standard library; only the
+five LLM providers behind one interface, with tools, agents, prompt templates, RAG,
+decision models and observability on top. The core package uses only the standard library; only the
 optional `tracing` package depends on OpenTelemetry.
 
 | Provider | Constructor | Notes |
@@ -190,6 +190,58 @@ msgs, err := tmpl.Format(map[string]any{"role": "travel guide", "lang": "Indones
 
 Contents are `text/template`s; a variable the template uses but `Format` is not given is an error.
 
+### Embeddings and RAG
+
+OpenAI, Azure and BytePlus implement `bungkus.Embedder`. The `rag` package splits
+text, stores embeddings in memory, and retrieves the closest chunks:
+
+```go
+import "github.com/jerichosiahaya/bungkus/rag"
+
+store := &rag.Memory{Embedder: bungkus.NewOpenAI(key), Model: "text-embedding-3-small"}
+err := store.Add(ctx, rag.Chunks("handbook.md", text, 1000, 150)...) // 1000-rune chunks, 150 overlap
+
+docs, err := store.Retrieve(ctx, "how many leave days do I get?", 4) // most similar first, with Score
+```
+
+Or let an agent search when it needs to:
+
+```go
+a := &agent.ReAct{Provider: p, Request: bungkus.ChatRequest{Model: "gpt-5"},
+	Tools: []tool.Invokable{rag.NewTool("search_handbook", "Search the employee handbook", store, 4)}}
+```
+
+`rag.Memory` scans every vector, which is fine up to about 100k chunks. Beyond that,
+implement `rag.Retriever` (one method) over your vector database.
+
+### Decision models
+
+Decision models answer typed questions about an input with probabilities instead of
+text, in one fast pass: yes/no, pick one of several choices, or score on a scale.
+
+```go
+resp, err := bungkus.NewOpenAI(key).Decide(ctx, &bungkus.DecideRequest{
+	Model: "gpt-6-luna",
+	Input: "The package arrived with a broken screen. I want my money back.",
+	Questions: []bungkus.Question{
+		{Name: "damaged", Type: bungkus.QuestionYesNo, Instructions: "Does the customer report a damaged item?"},
+		{Name: "queue", Type: bungkus.QuestionChoice, Instructions: "Which team should handle this?",
+			Choices: []bungkus.Choice{{Value: "billing", Description: "Refunds"}, {Value: "shipping", Description: "Damaged items"}}},
+		{Name: "urgency", Type: bungkus.QuestionScore, Instructions: "How urgent is this?",
+			Choices: []bungkus.Choice{{Value: "low"}, {Value: "medium"}, {Value: "high"}}}, // levels, lowest first
+	},
+})
+damaged, _ := resp.Answer("damaged") // damaged.Probability
+queue, _ := resp.Answer("queue")     // queue.Choice, queue.Confidence, queue.Probabilities
+```
+
+Two request formats exist, and both return the same `DecideResponse`:
+
+| Format | Use | Endpoints |
+|---|---|---|
+| OpenAI `/decisions` | `NewOpenAI(key)`, or `WithBaseURL` for a compatible gateway | OpenAI, Vercel AI Gateway, LLM Gateway `/v1/decisions` |
+| System One (Jev) | `NewSystemOne(endpointURL, key)`; every question needs a `Name`; text only | TypeSafe, AIML API, LLM Gateway `/v1/systemone`, Liquid AI, Microsoft Foundry, Baseten, Upstage |
+
 ### Tool calling by hand
 
 Without the `tool` and `agent` packages, set `Tools` and run the loop yourself:
@@ -254,8 +306,8 @@ if errors.As(err, &apiErr) && apiErr.StatusCode == 401 {
 
 ## Observability
 
-Handlers on the context see every model call, tool call and agent run, with
-nested runs linked to their parent:
+Handlers on the context see every model call, tool call, agent run, embedding,
+retrieval and decision, with nested runs linked to their parent:
 
 ```go
 import (
@@ -294,7 +346,8 @@ var llm LLM = bungkus.NewOpenAI(key)
 
 ## Not yet supported
 
-Embeddings and retrieval, graph orchestration, multi-agent, Claude's `budget_tokens`
+Graph orchestration, multi-agent, embeddings for Anthropic and DeepSeek (they have no
+embeddings API), Claude's `budget_tokens`
 thinking (deprecated; use `ReasoningEffort`).
 
 ## Development
@@ -305,6 +358,17 @@ go test -race -cover ./...
 
 Tests run against local fake servers; no API keys needed. CI runs them on Go 1.25 and
 the latest Go, and publishes the coverage badge from `main`.
+
+Live tests call the real APIs for each provider whose key is set. They cost a little,
+so they only run with `BUNGKUS_LIVE=1`:
+
+```sh
+BUNGKUS_LIVE=1 OPENAI_API_KEY=... ANTHROPIC_API_KEY=... go test -run Live -v .
+```
+
+Keys: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `BYTEPLUS_API_KEY` (with
+`BUNGKUS_BYTEPLUS_MODEL`), `AZURE_OPENAI_API_KEY` (with `AZURE_OPENAI_ENDPOINT` and
+`AZURE_OPENAI_DEPLOYMENT`). Override any model with `BUNGKUS_<PROVIDER>_MODEL`.
 
 ## License
 
