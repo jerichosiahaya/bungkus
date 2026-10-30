@@ -23,6 +23,8 @@ import (
 //	BUNGKUS_LIVE=1 DEEPSEEK_API_KEY=... go test -run Live -v
 //
 // Override a model with BUNGKUS_<PROVIDER>_MODEL, e.g. BUNGKUS_OPENAI_MODEL.
+// Keys and models can also go in a .env file next to this one (git-ignored);
+// its values override the environment.
 type live struct {
 	name, model    string
 	provider       bungkus.Provider
@@ -34,6 +36,7 @@ func liveProviders(t *testing.T) []live {
 	if os.Getenv("BUNGKUS_LIVE") != "1" {
 		t.Skip("set BUNGKUS_LIVE=1 to call the real APIs")
 	}
+	loadDotEnv(t)
 	model := func(name, def string) string {
 		if m := os.Getenv("BUNGKUS_" + strings.ToUpper(name) + "_MODEL"); m != "" {
 			return m
@@ -60,6 +63,22 @@ func liveProviders(t *testing.T) []live {
 		t.Skip("no provider API keys set")
 	}
 	return ps
+}
+
+// loadDotEnv sets the KEY=value lines of .env, if there is one, for this test.
+func loadDotEnv(t *testing.T) {
+	b, err := os.ReadFile(".env")
+	if err != nil {
+		return
+	}
+	for line := range strings.Lines(string(b)) {
+		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "export "))
+		k, v, ok := strings.Cut(line, "=")
+		if !ok || strings.HasPrefix(line, "#") {
+			continue
+		}
+		t.Setenv(strings.TrimSpace(k), strings.Trim(strings.TrimSpace(v), `"'`))
+	}
 }
 
 func eachLive(t *testing.T, f func(t *testing.T, l live, ctx context.Context)) {

@@ -426,6 +426,14 @@ so they only run with `BUNGKUS_LIVE=1`:
 BUNGKUS_LIVE=1 OPENAI_API_KEY=... ANTHROPIC_API_KEY=... go test -run Live -v .
 ```
 
+Or put the keys in a `.env` file in the repo root (git-ignored), which overrides the
+environment:
+
+```sh
+OPENAI_API_KEY=sk-...
+DEEPSEEK_API_KEY=sk-...
+```
+
 Keys: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `BYTEPLUS_API_KEY` (with
 `BUNGKUS_BYTEPLUS_MODEL`), `AZURE_OPENAI_API_KEY` (with `AZURE_OPENAI_ENDPOINT` and
 `AZURE_OPENAI_DEPLOYMENT`). Override any model with `BUNGKUS_<PROVIDER>_MODEL`.
