@@ -426,8 +426,8 @@ so they only run with `BUNGKUS_LIVE=1`:
 BUNGKUS_LIVE=1 OPENAI_API_KEY=... ANTHROPIC_API_KEY=... go test -run Live -v .
 ```
 
-Or put the keys in a `.env` file in the repo root (git-ignored), which overrides the
-environment:
+Or put the keys in a `.env` file in the repo root (git-ignored). Its non-empty values
+override the environment:
 
 ```sh
 OPENAI_API_KEY=sk-...
@@ -437,6 +437,22 @@ DEEPSEEK_API_KEY=sk-...
 Keys: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `BYTEPLUS_API_KEY` (with
 `BUNGKUS_BYTEPLUS_MODEL`), `AZURE_OPENAI_API_KEY` (with `AZURE_OPENAI_ENDPOINT` and
 `AZURE_OPENAI_DEPLOYMENT`). Override any model with `BUNGKUS_<PROVIDER>_MODEL`.
+
+### Live test results
+
+Last run of `go test -run Live` against the real APIs:
+
+| Provider | Model | Date | Chat | Stream | Agent tool loop (Run + Stream) | JSON schema | Image | PDF file |
+|---|---|---|---|---|---|---|---|---|
+| OpenAI | `gpt-5-mini` | 2026-10-30 | pass | pass | pass | pass | pass | pass |
+| DeepSeek | `deepseek-chat` | — | not run yet | | | | n/a | n/a |
+| Anthropic | | — | not run yet | | | | | |
+| Azure OpenAI | | — | not run yet | | | | | |
+| BytePlus | | — | not run yet | | | | | n/a |
+
+Not yet checked against the real APIs: embeddings, decision models, the DeepSeek and
+Claude reasoning round trip in tool loops, and BytePlus. These are covered only by
+tests against fake servers so far.
 
 ## License
 

@@ -24,7 +24,7 @@ import (
 //
 // Override a model with BUNGKUS_<PROVIDER>_MODEL, e.g. BUNGKUS_OPENAI_MODEL.
 // Keys and models can also go in a .env file next to this one (git-ignored);
-// its values override the environment.
+// its non-empty values override the environment.
 type live struct {
 	name, model    string
 	provider       bungkus.Provider
@@ -74,10 +74,11 @@ func loadDotEnv(t *testing.T) {
 	for line := range strings.Lines(string(b)) {
 		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "export "))
 		k, v, ok := strings.Cut(line, "=")
-		if !ok || strings.HasPrefix(line, "#") {
+		v = strings.Trim(strings.TrimSpace(v), `"'`)
+		if !ok || v == "" || strings.HasPrefix(line, "#") { // an empty value does not hide the environment's
 			continue
 		}
-		t.Setenv(strings.TrimSpace(k), strings.Trim(strings.TrimSpace(v), `"'`))
+		t.Setenv(strings.TrimSpace(k), v)
 	}
 }
 
