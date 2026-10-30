@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="bungkus logo: an animated white plastic wrapper" width="320">
+  <img src="assets/logo.svg" alt="bungkus logo: a white sheet of paper crumpling into a ball and being tossed" width="320">
 </p>
 
 # bungkus

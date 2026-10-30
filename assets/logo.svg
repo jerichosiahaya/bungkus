@@ -1,90 +1,78 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 200" width="360" height="200" role="img" aria-label="bungkus logo: a white plastic wrapper">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 220" width="360" height="220" role="img" aria-label="bungkus logo: a white sheet of paper crumpling into a ball and being tossed">
   <title>bungkus</title>
+  <!--
+    A sheet of paper crumples into a wad (bungkus: "wrap" in Indonesian), is
+    tossed, lands, and smooths out again. 6s loop. The outline morphs between
+    two 12-point polygons, so the sheet and wad points must stay in the same
+    clockwise order.
+  -->
   <defs>
-    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="0.55" stop-color="#f7f9fb"/>
-      <stop offset="1" stop-color="#e3e8ee"/>
-    </linearGradient>
-    <linearGradient id="end" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#e6ebf1"/>
-    </linearGradient>
-    <linearGradient id="shine" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
-      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.95"/>
-      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#eef1f5"/>
     </linearGradient>
     <radialGradient id="shadow">
-      <stop offset="0" stop-color="#000" stop-opacity="0.18"/>
+      <stop offset="0" stop-color="#000" stop-opacity="0.2"/>
       <stop offset="1" stop-color="#000" stop-opacity="0"/>
     </radialGradient>
-    <clipPath id="bodyClip">
-      <path d="M118 62 C150 50 210 50 242 62 C256 80 256 120 242 138 C210 150 150 150 118 138 C104 120 104 80 118 62 Z"/>
-    </clipPath>
   </defs>
 
   <style>
-    .float  { animation: float 3s ease-in-out infinite; }
-    .shadow { animation: shadow 3s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
-    .twistL { animation: twist 1.5s ease-in-out infinite; transform-box: fill-box; transform-origin: right center; }
-    .twistR { animation: twist 1.5s ease-in-out infinite reverse; transform-box: fill-box; transform-origin: left center; }
-    .crinkle { animation: crinkle 1.5s ease-in-out infinite; }
-    .sweep  { animation: sweep 3s ease-in-out infinite; }
-    @keyframes float   { 0%, 100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-8px) rotate(2deg); } }
-    @keyframes shadow  { 0%, 100% { transform: scaleX(1); opacity: 1; } 50% { transform: scaleX(0.82); opacity: 0.7; } }
-    @keyframes twist   { 0%, 100% { transform: scaleY(1) skewY(0deg); } 50% { transform: scaleY(0.78) skewY(6deg); } }
-    @keyframes crinkle { 0%, 100% { opacity: 0.9; } 50% { opacity: 0.35; } }
-    @keyframes sweep   { 0% { transform: translateX(-160px) skewX(-20deg); } 60%, 100% { transform: translateX(200px) skewX(-20deg); } }
-    @media (prefers-reduced-motion: reduce) {
-      .float, .shadow, .twistL, .twistR, .crinkle, .sweep { animation: none; }
+    .toss   { animation: toss 6s ease-in-out infinite; transform-origin: 180px 110px; }
+    .shadow { animation: shadow 6s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes toss {
+      0%, 30%  { transform: translateY(0) rotate(0deg) scale(1, 1); }
+      48%      { transform: translateY(-46px) rotate(200deg) scale(1, 1); animation-timing-function: ease-in; }
+      62%      { transform: translateY(6px) rotate(360deg) scale(1.12, 0.86); }
+      68%      { transform: translateY(0) rotate(360deg) scale(0.97, 1.03); }
+      74%, 100% { transform: translateY(0) rotate(360deg) scale(1, 1); }
+    }
+    @keyframes shadow {
+      0%, 30%   { transform: scaleX(1); opacity: 1; }
+      48%       { transform: scaleX(0.6); opacity: 0.45; }
+      62%       { transform: scaleX(1.1); opacity: 1; }
+      74%, 100% { transform: scaleX(0.8); opacity: 0.9; }
     }
   </style>
 
-  <ellipse class="shadow" cx="180" cy="178" rx="92" ry="9" fill="url(#shadow)"/>
+  <ellipse class="shadow" cx="180" cy="196" rx="70" ry="8" fill="url(#shadow)"/>
 
-  <g class="float" style="transform-origin: 180px 100px">
-    <!-- left twisted end -->
-    <g class="twistL">
-      <path d="M112 86 L60 52 C52 70 50 82 56 92 C50 104 52 120 60 148 L112 114 C108 104 108 96 112 86 Z"
-            fill="url(#end)" stroke="#c3ccd6" stroke-width="2" stroke-linejoin="round"/>
-      <g class="crinkle" fill="none" stroke="#cfd7e0" stroke-width="1.6" stroke-linecap="round">
-        <path d="M100 92 L66 66"/>
-        <path d="M100 100 L60 100"/>
-        <path d="M100 108 L66 134"/>
-      </g>
+  <g class="toss">
+    <!-- outline: sheet <-> wad -->
+    <polygon fill="url(#paper)" stroke="#bfc8d3" stroke-width="2.2" stroke-linejoin="round"
+      points="120,50 160,50 200,50 240,50 240,90 240,130 240,170 200,170 160,170 120,170 120,130 120,90">
+      <animate attributeName="points" dur="6s" repeatCount="indefinite"
+        keyTimes="0;0.12;0.3;0.85;1" calcMode="spline"
+        keySplines="0 0 1 1; 0.4 0 0.2 1; 0 0 1 1; 0.4 0 0.2 1"
+        values="120,50 160,50 200,50 240,50 240,90 240,130 240,170 200,170 160,170 120,170 120,130 120,90;
+                120,50 160,50 200,50 240,50 240,90 240,130 240,170 200,170 160,170 120,170 120,130 120,90;
+                136,78 166,60 200,70 222,66 238,100 224,118 216,148 182,150 156,158 134,138 128,112 140,98;
+                136,78 166,60 200,70 222,66 238,100 224,118 216,148 182,150 156,158 134,138 128,112 140,98;
+                120,50 160,50 200,50 240,50 240,90 240,130 240,170 200,170 160,170 120,170 120,130 120,90"/>
+    </polygon>
+
+    <!-- ruled lines, visible while flat -->
+    <g fill="none" stroke="#d3dae2" stroke-width="2" stroke-linecap="round" opacity="1">
+      <path d="M136 82 H224 M136 102 H224 M136 122 H224 M136 142 H196"/>
+      <animate attributeName="opacity" dur="6s" repeatCount="indefinite"
+        keyTimes="0;0.12;0.18;0.9;1" values="1;1;0;0;1"/>
     </g>
 
-    <!-- right twisted end -->
-    <g class="twistR">
-      <path d="M248 86 L300 52 C308 70 310 82 304 92 C310 104 308 120 300 148 L248 114 C252 104 252 96 248 86 Z"
-            fill="url(#end)" stroke="#c3ccd6" stroke-width="2" stroke-linejoin="round"/>
-      <g class="crinkle" fill="none" stroke="#cfd7e0" stroke-width="1.6" stroke-linecap="round">
-        <path d="M260 92 L294 66"/>
-        <path d="M260 100 L300 100"/>
-        <path d="M260 108 L294 134"/>
-      </g>
-    </g>
-
-    <!-- pinched necks -->
-    <rect x="106" y="84" width="14" height="32" rx="6" fill="#eef2f6" stroke="#c3ccd6" stroke-width="2"/>
-    <rect x="240" y="84" width="14" height="32" rx="6" fill="#eef2f6" stroke="#c3ccd6" stroke-width="2"/>
-
-    <!-- body -->
-    <path d="M118 62 C150 50 210 50 242 62 C256 80 256 120 242 138 C210 150 150 150 118 138 C104 120 104 80 118 62 Z"
-          fill="url(#body)" stroke="#c3ccd6" stroke-width="2"/>
-    <g clip-path="url(#bodyClip)">
-      <!-- plastic folds -->
-      <g class="crinkle" fill="none" stroke="#d6dde5" stroke-width="1.6" stroke-linecap="round">
-        <path d="M124 78 L146 92"/>
-        <path d="M124 122 L144 112"/>
-        <path d="M236 80 L218 96 L230 104"/>
-        <path d="M200 132 L214 124"/>
-      </g>
-      <!-- gloss -->
-      <path d="M132 68 C160 60 200 60 228 68" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" opacity="0.9"/>
-      <!-- moving shine -->
-      <rect class="sweep" x="150" y="40" width="34" height="130" fill="url(#shine)"/>
+    <!-- creased facets, visible while crumpled -->
+    <g stroke="#cdd5de" stroke-width="1.6" stroke-linejoin="round" opacity="0">
+      <polygon points="166,60 200,70 186,92" fill="#f9fbfc"/>
+      <polygon points="200,70 222,66 238,100 186,92" fill="#e4e9ef"/>
+      <polygon points="136,78 166,60 186,92 150,104" fill="#ffffff"/>
+      <polygon points="140,98 136,78 150,104" fill="#e7ecf1"/>
+      <polygon points="150,104 186,92 196,124 162,132" fill="#f3f6f9"/>
+      <polygon points="186,92 238,100 224,118 196,124" fill="#dde3ea"/>
+      <polygon points="128,112 140,98 150,104 162,132 134,138" fill="#f6f8fa"/>
+      <polygon points="196,124 224,118 216,148 182,150" fill="#e2e7ed"/>
+      <polygon points="162,132 196,124 182,150 156,158" fill="#fbfcfd"/>
+      <polygon points="134,138 162,132 156,158" fill="#e8ecf1"/>
+      <path d="M158 80 L172 72 M204 104 L220 106 M140 120 L150 126 M190 136 L204 132" fill="none"/>
+      <animate attributeName="opacity" dur="6s" repeatCount="indefinite"
+        keyTimes="0;0.2;0.3;0.82;0.88;1" values="0;0;1;1;0;0"/>
     </g>
   </g>
 </svg>
