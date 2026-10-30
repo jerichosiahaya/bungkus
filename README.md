@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.svg" alt="bungkus logo: an animated white plastic wrapper" width="320">
+</p>
+
 # bungkus
 
 [![CI](https://github.com/jerichosiahaya/bungkus/actions/workflows/ci.yml/badge.svg)](https://github.com/jerichosiahaya/bungkus/actions/workflows/ci.yml)

@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 200" width="360" height="200" role="img" aria-label="bungkus logo: a white plastic wrapper">
+  <title>bungkus</title>
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.55" stop-color="#f7f9fb"/>
+      <stop offset="1" stop-color="#e3e8ee"/>
+    </linearGradient>
+    <linearGradient id="end" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e6ebf1"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="shadow">
+      <stop offset="0" stop-color="#000" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="bodyClip">
+      <path d="M118 62 C150 50 210 50 242 62 C256 80 256 120 242 138 C210 150 150 150 118 138 C104 120 104 80 118 62 Z"/>
+    </clipPath>
+  </defs>
+
+  <style>
+    .float  { animation: float 3s ease-in-out infinite; }
+    .shadow { animation: shadow 3s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+    .twistL { animation: twist 1.5s ease-in-out infinite; transform-box: fill-box; transform-origin: right center; }
+    .twistR { animation: twist 1.5s ease-in-out infinite reverse; transform-box: fill-box; transform-origin: left center; }
+    .crinkle { animation: crinkle 1.5s ease-in-out infinite; }
+    .sweep  { animation: sweep 3s ease-in-out infinite; }
+    @keyframes float   { 0%, 100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-8px) rotate(2deg); } }
+    @keyframes shadow  { 0%, 100% { transform: scaleX(1); opacity: 1; } 50% { transform: scaleX(0.82); opacity: 0.7; } }
+    @keyframes twist   { 0%, 100% { transform: scaleY(1) skewY(0deg); } 50% { transform: scaleY(0.78) skewY(6deg); } }
+    @keyframes crinkle { 0%, 100% { opacity: 0.9; } 50% { opacity: 0.35; } }
+    @keyframes sweep   { 0% { transform: translateX(-160px) skewX(-20deg); } 60%, 100% { transform: translateX(200px) skewX(-20deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      .float, .shadow, .twistL, .twistR, .crinkle, .sweep { animation: none; }
+    }
+  </style>
+
+  <ellipse class="shadow" cx="180" cy="178" rx="92" ry="9" fill="url(#shadow)"/>
+
+  <g class="float" style="transform-origin: 180px 100px">
+    <!-- left twisted end -->
+    <g class="twistL">
+      <path d="M112 86 L60 52 C52 70 50 82 56 92 C50 104 52 120 60 148 L112 114 C108 104 108 96 112 86 Z"
+            fill="url(#end)" stroke="#c3ccd6" stroke-width="2" stroke-linejoin="round"/>
+      <g class="crinkle" fill="none" stroke="#cfd7e0" stroke-width="1.6" stroke-linecap="round">
+        <path d="M100 92 L66 66"/>
+        <path d="M100 100 L60 100"/>
+        <path d="M100 108 L66 134"/>
+      </g>
+    </g>
+
+    <!-- right twisted end -->
+    <g class="twistR">
+      <path d="M248 86 L300 52 C308 70 310 82 304 92 C310 104 308 120 300 148 L248 114 C252 104 252 96 248 86 Z"
+            fill="url(#end)" stroke="#c3ccd6" stroke-width="2" stroke-linejoin="round"/>
+      <g class="crinkle" fill="none" stroke="#cfd7e0" stroke-width="1.6" stroke-linecap="round">
+        <path d="M260 92 L294 66"/>
+        <path d="M260 100 L300 100"/>
+        <path d="M260 108 L294 134"/>
+      </g>
+    </g>
+
+    <!-- pinched necks -->
+    <rect x="106" y="84" width="14" height="32" rx="6" fill="#eef2f6" stroke="#c3ccd6" stroke-width="2"/>
+    <rect x="240" y="84" width="14" height="32" rx="6" fill="#eef2f6" stroke="#c3ccd6" stroke-width="2"/>
+
+    <!-- body -->
+    <path d="M118 62 C150 50 210 50 242 62 C256 80 256 120 242 138 C210 150 150 150 118 138 C104 120 104 80 118 62 Z"
+          fill="url(#body)" stroke="#c3ccd6" stroke-width="2"/>
+    <g clip-path="url(#bodyClip)">
+      <!-- plastic folds -->
+      <g class="crinkle" fill="none" stroke="#d6dde5" stroke-width="1.6" stroke-linecap="round">
+        <path d="M124 78 L146 92"/>
+        <path d="M124 122 L144 112"/>
+        <path d="M236 80 L218 96 L230 104"/>
+        <path d="M200 132 L214 124"/>
+      </g>
+      <!-- gloss -->
+      <path d="M132 68 C160 60 200 60 228 68" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" opacity="0.9"/>
+      <!-- moving shine -->
+      <rect class="sweep" x="150" y="40" width="34" height="130" fill="url(#shine)"/>
+    </g>
+  </g>
+</svg>
