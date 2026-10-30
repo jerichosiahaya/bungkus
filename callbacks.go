@@ -10,6 +10,10 @@ const (
 	ComponentModel = "model" // input *ChatRequest, output *ChatResponse (for streams, the collected reply)
 	ComponentTool  = "tool"  // input ToolCall, output string (the result sent to the model)
 	ComponentAgent = "agent" // input []Message, output the agent's result (*agent.Result)
+
+	ComponentEmbedder  = "embedder"  // input *EmbedRequest, output *EmbedResponse
+	ComponentRetriever = "retriever" // input the query string, output []rag.Document
+	ComponentDecider   = "decider"   // input *DecideRequest, output *DecideResponse
 )
 
 // RunInfo says what a callback is about.
