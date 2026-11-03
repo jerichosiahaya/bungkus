@@ -4,6 +4,10 @@
 
 # bungkus
 
+[![Latest release](https://img.shields.io/github/v/release/jerichosiahaya/bungkus?include_prereleases&label=release)](https://github.com/jerichosiahaya/bungkus/releases)
+
+> **Alpha software:** APIs and provider behavior may change between releases. Validate the providers and models you use before relying on bungkus in production. See the [changelog](CHANGELOG.md) and [GitHub releases](https://github.com/jerichosiahaya/bungkus/releases).
+
 [![CI](https://github.com/jerichosiahaya/bungkus/actions/workflows/ci.yml/badge.svg)](https://github.com/jerichosiahaya/bungkus/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jerichosiahaya/bungkus/badges/coverage.json)](https://github.com/jerichosiahaya/bungkus/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/jerichosiahaya/bungkus.svg)](https://pkg.go.dev/github.com/jerichosiahaya/bungkus)
