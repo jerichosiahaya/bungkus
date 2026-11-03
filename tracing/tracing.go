@@ -79,9 +79,9 @@ func (h *handler) OnStart(ctx context.Context, info bungkus.RunInfo, input any) 
 		name = "invoke_agent " + info.Name
 		attrs = append(attrs, attribute.String("gen_ai.operation.name", "invoke_agent"), attribute.String("gen_ai.agent.name", info.Name))
 		attrs = h.appendJSON(attrs, "input.value", input)
-	case bungkus.ComponentWorkflow, bungkus.ComponentWorkflowNode:
-		// Workflow state is caller-owned and may contain sensitive data; never
-		// record it, even when content recording is enabled.
+	case bungkus.ComponentWorkflow, bungkus.ComponentWorkflowNode, bungkus.ComponentDiscussion:
+		// Workflow/discussion state can contain sensitive data; never record it,
+		// even when content recording is enabled.
 	}
 	ctx, _ = h.tracer.Start(ctx, name, trace.WithSpanKind(kind), trace.WithAttributes(attrs...))
 	return ctx

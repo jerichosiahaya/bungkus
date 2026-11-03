@@ -16,6 +16,7 @@ const (
 	ComponentDecider      = "decider"       // input *DecideRequest, output *DecideResponse
 	ComponentWorkflow     = "workflow"      // input nil, output a workflow result
 	ComponentWorkflowNode = "workflow_node" // input and output nil
+	ComponentDiscussion   = "discussion"    // input nil, output *agent.DiscussionResult
 )
 
 // RunInfo says what a callback is about.

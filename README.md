@@ -177,6 +177,31 @@ history = append(history, res.Messages...) // tool calls, tool results and the a
 When a tool gets bad arguments or the model names an unknown tool, the error goes
 back to the model so it can retry. An error your tool function returns stops the run.
 
+`agent.Discussion` runs a moderated multi-agent conversation: the coordinator picks a participant for each turn or responds with `DONE` when it believes the goal is complete. Each participant has its own provider/model/system prompt and optional tools, and receives the shared transcript. `MaxTurns` bounds participant messages. Set `ParallelTurns` to allow the coordinator to select a comma-separated batch of independent speakers; their calls run concurrently against the same transcript snapshot and are appended in declaration order. The API is experimental and returns `Completed=false` if the turn cap is reached. Run the optional, billable LiteLLM end-to-end test with `BUNGKUS_LIVE=1 LITELLM_API_KEY=... go test -v ./agent -run TestLiveLiteLLMDiscussion` (override `LITELLM_BASE_URL` or `BUNGKUS_LITELLM_MODEL` if needed).
+
+```go
+d := &agent.Discussion{
+	Goal: "Agree on a migration plan",
+	Coordinator: agent.DiscussionCoordinator{
+		Provider: p,
+		Request: bungkus.ChatRequest{Model: "gpt-5-mini"},
+	},
+	Participants: []agent.DiscussionParticipant{
+		{Name: "architect", Provider: p, Request: bungkus.ChatRequest{Model: "gpt-5-mini",
+			Messages: []bungkus.Message{{Role: "system", Content: "You are a pragmatic software architect."}}}},
+		{Name: "reviewer", Provider: p, Request: bungkus.ChatRequest{Model: "gpt-5-mini",
+			Messages: []bungkus.Message{{Role: "system", Content: "Find risks and ask for evidence."}}}},
+	},
+	MaxTurns: 8,
+	ParallelTurns: true, // coordinator may select multiple independent participants
+}
+res, err := d.Run(ctx, []bungkus.Message{{Role: "user", Content: "We need to migrate the database with no downtime."}})
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(res.Completed, res.Speakers, res.Usage.TotalTokens)
+```
+
 `a.Stream` runs the same loop but yields events as they happen:
 
 ```go
@@ -425,6 +450,7 @@ or run nodes concurrently. This API is experimental and may change before v1.0.
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/jerichosiahaya/bungkus/workflow"
@@ -464,11 +490,11 @@ if err != nil {
 fmt.Println(result.State.Answer, result.Trace)
 ```
 
-See [the workflow package docs](https://pkg.go.dev/github.com/jerichosiahaya/bungkus/workflow) for the complete API.
+See [the workflow package docs](https://pkg.go.dev/github.com/jerichosiahaya/bungkus/workflow) for the complete API. An opt-in end-to-end LiteLLM workflow test is available with `BUNGKUS_LIVE=1 LITELLM_API_KEY=... go test -v ./workflow -run TestLiveLiteLLMWorkflow`; set `LITELLM_BASE_URL` and `BUNGKUS_LITELLM_MODEL` to override its defaults. It makes a billable model request.
 
 ## Roadmap and limitations
 
-See [ROADMAP.md](ROADMAP.md) for potential next steps and project priorities. The graph package is experimental; review its compatibility caveat and the [design plan](GRAPH_ORCHESTRATION_PLAN.md). These plans are exploratory, not a schedule. Current limitations: multi-agent abstractions are not provided; Anthropic and DeepSeek do not expose embeddings APIs; Claude's `budget_tokens` thinking option is deprecated (use `ReasoningEffort`).
+See [ROADMAP.md](ROADMAP.md) for potential next steps and project priorities. The graph package is experimental; review its compatibility caveat and the [design plan](GRAPH_ORCHESTRATION_PLAN.md). These plans are exploratory, not a schedule. Current limitations: multi-agent discussion is experimental; parallel participants share the same transcript snapshot, and their output order is deterministic rather than conversational. Anthropic and DeepSeek do not expose embeddings APIs; Claude's `budget_tokens` thinking option is deprecated (use `ReasoningEffort`).
 
 ## Development
 

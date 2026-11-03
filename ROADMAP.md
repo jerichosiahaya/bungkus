@@ -13,7 +13,7 @@ This is a list of possible next steps, not a promise or a schedule. Priorities m
 
 - [ ] **Vector-store integration examples.** Demonstrate implementing `rag.Retriever` with an external vector store, without adding a mandatory database dependency to the core package.
 - [x] **Experimental graph orchestration MVP.** Added the bounded, synchronous `workflow` package for named nodes, branching, loops, typed state, and handler observability. See [GRAPH_ORCHESTRATION_PLAN.md](GRAPH_ORCHESTRATION_PLAN.md); the API is experimental and feedback is welcome.
-- [ ] **Multi-agent patterns.** Gather use cases and design a composable approach before introducing orchestration abstractions.
+- [x] **Experimental multi-agent discussion.** Added `agent.Discussion`: a coordinator selects named participants from a shared transcript, can end with `DONE`, and is bounded by `MaxTurns`. Participants can use tools; optional parallel batches run from one transcript snapshot and merge in deterministic order.
 
 ## Out of scope / not applicable
 
