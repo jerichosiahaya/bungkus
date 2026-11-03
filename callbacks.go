@@ -11,9 +11,11 @@ const (
 	ComponentTool  = "tool"  // input ToolCall, output string (the result sent to the model)
 	ComponentAgent = "agent" // input []Message, output the agent's result (*agent.Result)
 
-	ComponentEmbedder  = "embedder"  // input *EmbedRequest, output *EmbedResponse
-	ComponentRetriever = "retriever" // input the query string, output []rag.Document
-	ComponentDecider   = "decider"   // input *DecideRequest, output *DecideResponse
+	ComponentEmbedder     = "embedder"      // input *EmbedRequest, output *EmbedResponse
+	ComponentRetriever    = "retriever"     // input the query string, output []rag.Document
+	ComponentDecider      = "decider"       // input *DecideRequest, output *DecideResponse
+	ComponentWorkflow     = "workflow"      // input nil, output a workflow result
+	ComponentWorkflowNode = "workflow_node" // input and output nil
 )
 
 // RunInfo says what a callback is about.

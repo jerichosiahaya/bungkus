@@ -412,11 +412,63 @@ var llm LLM = bungkus.NewOpenAI(key)
 
 The same works for `bungkus.Embedder`, `bungkus.Decider` and `rag.Retriever`.
 
-## Not yet supported
+### Experimental workflow graphs
 
-Graph orchestration, multi-agent, embeddings for Anthropic and DeepSeek (they have no
-embeddings API), Claude's `budget_tokens`
-thinking (deprecated; use `ReasoningEffort`).
+The `workflow` package composes ordinary Go functions into bounded sequential,
+branching, or looping workflows. Nodes share caller-owned typed state and choose
+which node runs next; returning an empty route ends the workflow. Graph execution
+is synchronous, has a default limit of 100 node executions, and supports bungkus
+handlers for workflow/node observability. It does not persist state, retry nodes,
+or run nodes concurrently. This API is experimental and may change before v1.0.
+
+```go
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/jerichosiahaya/bungkus/workflow"
+)
+
+type Ticket struct {
+	Input  string
+	Answer string
+}
+
+g := workflow.New[Ticket]("support")
+if err := g.Add("classify", func(_ context.Context, t *Ticket) (string, error) {
+	if strings.Contains(t.Input, "refund") {
+		return "refund", nil
+	}
+	return "answer", nil
+}); err != nil {
+	return err
+}
+if err := g.Add("refund", func(_ context.Context, t *Ticket) (string, error) {
+	t.Answer = "Refund requested"
+	return "", nil // empty route ends the workflow
+}); err != nil {
+	return err
+}
+if err := g.Add("answer", func(_ context.Context, t *Ticket) (string, error) {
+	t.Answer = "Here is the order information"
+	return "", nil
+}); err != nil {
+	return err
+}
+g.StartAt("classify")
+result, err := g.Run(ctx, Ticket{Input: userMessage})
+if err != nil {
+	return err
+}
+fmt.Println(result.State.Answer, result.Trace)
+```
+
+See [the workflow package docs](https://pkg.go.dev/github.com/jerichosiahaya/bungkus/workflow) for the complete API.
+
+## Roadmap and limitations
+
+See [ROADMAP.md](ROADMAP.md) for potential next steps and project priorities. The graph package is experimental; review its compatibility caveat and the [design plan](GRAPH_ORCHESTRATION_PLAN.md). These plans are exploratory, not a schedule. Current limitations: multi-agent abstractions are not provided; Anthropic and DeepSeek do not expose embeddings APIs; Claude's `budget_tokens` thinking option is deprecated (use `ReasoningEffort`).
 
 ## Development
 
