@@ -6,7 +6,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write # to publish the coverage badge to the badges branch
+  contents: read
 
 jobs:
   test:
@@ -23,8 +23,20 @@ jobs:
       - run: go vet ./...
       - run: go test -race -coverprofile=cover.out ./...
 
+  coverage-badge:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+      - run: go test -coverprofile=cover.out ./...
+
       - name: Publish coverage badge
-        if: github.event_name == 'push' && matrix.go == 'stable'
         run: |
           pct=$(go tool cover -func=cover.out | awk '/^total:/ {sub("%", "", $3); print $3}')
           color=$(awk -v p="$pct" 'BEGIN {print (p >= 90) ? "brightgreen" : (p >= 75) ? "yellow" : "red"}')

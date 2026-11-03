@@ -420,6 +420,8 @@ thinking (deprecated; use `ReasoningEffort`).
 
 ## Development
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and contribution guidelines.
+
 ```sh
 go test -race -cover ./...
 ```

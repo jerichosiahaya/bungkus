@@ -1,0 +1,57 @@
+name: Bug report
+description: Report a reproducible bug in bungkus
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For security vulnerabilities, do not open a public issue. Contact the maintainers privately.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps or code to reproduce
+      description: Include a minimal example. Remove API keys and sensitive data.
+      render: go
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: bungkus version
+      placeholder: v0.1.0-alpha.1
+    validations:
+      required: true
+  - type: input
+    id: go-version
+    attributes:
+      label: Go version
+      placeholder: go version go1.25.0 linux/amd64
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options:
+        - OpenAI
+        - Anthropic
+        - Azure OpenAI
+        - BytePlus
+        - DeepSeek
+        - SystemOne / decisions
+        - Not provider-specific
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
